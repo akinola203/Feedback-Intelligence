@@ -32,6 +32,24 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "True") == "True"
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
+# Phase 3B: accounts.User is the platform's AUTH_USER_MODEL. PlatformAdmin
+# is deliberately NOT this — it stays structurally separate per Phase 2
+# §2/§A, authenticated via its own session-based path instead (see
+# accounts/platform_auth.py, added in a later Phase 3B checkpoint).
+AUTH_USER_MODEL = "accounts.User"
+
+# The only authentication backend for accounts.User. Django's default
+# ModelBackend is deliberately EXCLUDED — not just redundant. Testing
+# confirmed it can raise an unhandled ValidationError when called with a
+# credential shape it doesn't expect (e.g. authenticate(username=...) with
+# a non-UUID value, since our USERNAME_FIELD is "id"), rather than
+# rejecting cleanly. Including it would mean an unrelated authenticate()
+# call elsewhere in the app crashing instead of returning None. See the
+# Phase 3B Step 2 checkpoint report for the concrete failing case.
+AUTHENTICATION_BACKENDS = [
+    "accounts.backends.OrgScopedEmailBackend",
+]
+
 
 # Application definition
 
