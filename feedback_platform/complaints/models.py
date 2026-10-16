@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from core.models import BaseModel
@@ -71,6 +72,41 @@ class Complaint(BaseModel):
     def __str__(self):
         return f"Complaint({self.id}, {self.status})"
 
+    def clean(self):
+        super().clean()
+        if (
+            self.feedback_id
+            and self.branch_id
+            and self.feedback.branch_id != self.branch_id
+        ):
+            raise ValidationError(
+                "Complaint branch must match the parent feedback branch."
+            )
+        if (
+            self.branch_id
+            and self.organization_id
+            and self.branch.organization_id != self.organization_id
+        ):
+            raise ValidationError(
+                "Complaint organization must match the branch organization."
+            )
+        if (
+            self.created_by_id
+            and self.organization_id
+            and self.created_by.organization_id != self.organization_id
+        ):
+            raise ValidationError(
+                "Complaint creator must belong to the complaint organization."
+            )
+        if (
+            self.assigned_to_id
+            and self.organization_id
+            and self.assigned_to.organization_id != self.organization_id
+        ):
+            raise ValidationError(
+                "Assigned user must belong to the complaint organization."
+            )
+
     def save(self, *args, **kwargs):
         # Belt-and-braces app-layer consistency, mirroring Feedback.save()
         # (Phase 2 §D.1) — the DB composite FKs are the hard guarantee.
@@ -78,6 +114,8 @@ class Complaint(BaseModel):
             self.branch_id = self.feedback.branch_id
         if self.branch_id and not self.organization_id:
             self.organization_id = self.branch.organization_id
+        elif self.feedback_id and not self.organization_id:
+            self.organization_id = self.feedback.organization_id
         super().save(*args, **kwargs)
 
 
@@ -96,3 +134,14 @@ class ComplaintNote(BaseModel):
 
     def __str__(self):
         return f"Note on {self.complaint_id} by {self.author_id}"
+
+    def clean(self):
+        super().clean()
+        if (
+            self.author_id
+            and self.complaint_id
+            and self.author.organization_id != self.complaint.organization_id
+        ):
+            raise ValidationError(
+                "Note author must belong to the same organization as the complaint."
+            )

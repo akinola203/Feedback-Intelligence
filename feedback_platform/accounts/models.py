@@ -33,6 +33,15 @@ class PlatformAdmin(BaseModel):
     def __str__(self):
         return self.email
 
+    @staticmethod
+    def normalize_admin_email(email):
+        return email.strip().lower() if email else email
+
+    def save(self, *args, **kwargs):
+        if self.email:
+            self.email = self.normalize_admin_email(self.email)
+        super().save(*args, **kwargs)
+
     def set_password(self, raw_password):
         self.password = make_password(raw_password)
 
@@ -58,6 +67,7 @@ class UserManager(BaseUserManager):
         return self.get(pk=pk)
 
     def create_user(self, organization, email, password=None, role=None, **extra_fields):
+        role = role or self.model.Role.STAFF
         user = self.model(
             organization=organization, email=self.model.normalize_user_email(email),
             role=role, **extra_fields
@@ -149,6 +159,32 @@ class User(BaseModel, AbstractBaseUser):
 
     def __str__(self):
         return f"{self.email} ({self.organization.slug}, {self.role})"
+
+    @property
+    def is_staff(self):
+        return False
+
+    @property
+    def is_superuser(self):
+        return False
+
+    def has_perm(self, perm, obj=None):
+        return False
+
+    def has_perms(self, perm_list, obj=None):
+        return False
+
+    def has_module_perms(self, app_label):
+        return False
+
+    def get_all_permissions(self, obj=None):
+        return set()
+
+    def get_user_permissions(self, obj=None):
+        return set()
+
+    def get_group_permissions(self, obj=None):
+        return set()
 
     @staticmethod
     def normalize_user_email(email):

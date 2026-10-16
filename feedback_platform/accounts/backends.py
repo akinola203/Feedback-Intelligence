@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.backends import BaseBackend
+from django.core.exceptions import ValidationError
 
 from organizations.models import Organization
 
@@ -52,7 +53,7 @@ class OrgScopedEmailBackend(BaseBackend):
 
         try:
             user = User.objects.get(organization=organization, email__iexact=normalized_email)
-        except User.DoesNotExist:
+        except (User.DoesNotExist, User.MultipleObjectsReturned):
             # Run the password hasher against a throwaway instance
             # anyway, mirroring Django's own ModelBackend. This costs
             # roughly the same time as a real check_password() call, so
@@ -72,11 +73,13 @@ class OrgScopedEmailBackend(BaseBackend):
         return user
 
     def user_can_authenticate(self, user):
-        """Reject inactive users — mirrors Django's ModelBackend."""
-        return getattr(user, "is_active", False)
+        """Reject inactive users and users belonging to inactive organizations."""
+        return getattr(user, "is_active", False) and getattr(
+            getattr(user, "organization", None), "is_active", True
+        )
 
     def get_user(self, user_id):
         try:
             return User.objects.get(pk=user_id)
-        except (User.DoesNotExist, ValueError, TypeError):
+        except (User.DoesNotExist, ValueError, TypeError, ValidationError):
             return None

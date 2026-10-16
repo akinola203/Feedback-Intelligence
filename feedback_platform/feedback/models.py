@@ -1,5 +1,6 @@
 import secrets
 
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from core.models import BaseModel
@@ -159,6 +160,19 @@ class Feedback(BaseModel):
 
     def __str__(self):
         return f"Feedback({self.branch.name}, {self.rating}★)"
+
+    def clean(self):
+        super().clean()
+        if (
+            self.branch_id
+            and self.organization_id
+            and self.branch.organization_id != self.organization_id
+        ):
+            raise ValidationError(
+                "Feedback branch organization does not match feedback organization."
+            )
+        if self.rating is not None and not (1 <= self.rating <= 5):
+            raise ValidationError("Feedback rating must be between 1 and 5.")
 
     @staticmethod
     def derive_sentiment(rating: int) -> str:

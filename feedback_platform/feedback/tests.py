@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
@@ -89,3 +90,32 @@ class FeedbackSentimentTests(TestCase):
                 Feedback.objects.create(
                     branch=self.branch, category=self.category, rating=6,
                 )
+
+    def test_model_string_representations(self):
+        self.assertEqual(str(self.category), "Staff")
+        qr = QRCode.objects.create(branch=self.branch)
+        self.assertEqual(str(qr), f"QR({self.branch.name}, active=True)")
+        fb = Feedback.objects.create(
+            branch=self.branch, category=self.category, rating=4,
+        )
+        self.assertEqual(str(fb), f"Feedback({self.branch.name}, 4★)")
+
+    def test_feedback_clean_rejects_mismatched_org(self):
+        other_org = Organization.objects.create(name="Other Org FB", slug="other-org-fb")
+        fb = Feedback(
+            branch=self.branch,
+            organization=other_org,
+            category=self.category,
+            rating=5,
+        )
+        with self.assertRaises(ValidationError):
+            fb.clean()
+
+    def test_feedback_clean_rejects_invalid_rating(self):
+        fb = Feedback(
+            branch=self.branch,
+            category=self.category,
+            rating=0,
+        )
+        with self.assertRaises(ValidationError):
+            fb.clean()

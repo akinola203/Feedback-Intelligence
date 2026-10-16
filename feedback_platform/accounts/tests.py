@@ -1,9 +1,10 @@
 from django.contrib.auth import authenticate
+from django.contrib.auth.context_processors import auth
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 
 from accounts.backends import OrgScopedEmailBackend
-from accounts.models import User
+from accounts.models import PlatformAdmin, User
 from organizations.models import Organization
 
 
@@ -88,6 +89,19 @@ class OrgScopedEmailBackendTests(TestCase):
             password="correct-password",
         )
         self.assertIsNone(result)
+
+    def test_user_of_inactive_organization_rejected(self):
+        self.org_a.is_active = False
+        self.org_a.save()
+        result = self.backend.authenticate(
+            None, organization=self.org_a, email="shared@example.com",
+            password="password-a",
+        )
+        self.assertIsNone(result)
+
+    def test_get_user_with_invalid_uuid(self):
+        self.assertIsNone(self.backend.get_user("not-a-valid-uuid"))
+        self.assertIsNone(self.backend.get_user(None))
 
     # 6. Missing/invalid organization context rejected safely.
     def test_missing_organization_rejected(self):
@@ -246,3 +260,75 @@ class CaseInsensitiveEmailUniquenessTests(TestCase):
         self.assertEqual(result_a, user_a)
         self.assertEqual(result_b, user_b)
         self.assertNotEqual(result_a, result_b)
+
+
+class PlatformAdminTests(TestCase):
+    def test_platform_admin_string_representation(self):
+        admin = PlatformAdmin(email="admin@platform.com")
+        self.assertEqual(str(admin), "admin@platform.com")
+
+    def test_platform_admin_password_hashing(self):
+        admin = PlatformAdmin(email="admin2@platform.com")
+        admin.set_password("secure-password")
+        admin.save()
+        self.assertNotEqual(admin.password, "secure-password")
+        self.assertTrue(admin.check_password("secure-password"))
+        self.assertFalse(admin.check_password("wrong-password"))
+
+    def test_platform_admin_email_normalized_on_save(self):
+        admin = PlatformAdmin.objects.create(
+            email="  ROOT@Platform.COM  ",
+            password="x",
+        )
+        self.assertEqual(admin.email, "root@platform.com")
+
+    def test_platform_admin_unique_email_enforced(self):
+        PlatformAdmin.objects.create(email="unique@platform.com", password="x")
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                PlatformAdmin.objects.create(email="unique@platform.com", password="y")
+
+
+class UserAuthCompatibilityTests(TestCase):
+    def setUp(self):
+        self.org = Organization.objects.create(name="Org R", slug="org-r")
+        self.user = User.objects.create(
+            organization=self.org,
+            email="user@org-r.com",
+            role=User.Role.ADMIN,
+        )
+
+    def test_user_permission_methods_return_safe_defaults(self):
+        self.assertFalse(self.user.is_staff)
+        self.assertFalse(self.user.is_superuser)
+        self.assertFalse(self.user.has_perm("accounts.view_user"))
+        self.assertFalse(self.user.has_perms(["accounts.view_user"]))
+        self.assertFalse(self.user.has_module_perms("accounts"))
+        self.assertEqual(self.user.get_all_permissions(), set())
+        self.assertEqual(self.user.get_user_permissions(), set())
+        self.assertEqual(self.user.get_group_permissions(), set())
+
+    def test_user_works_with_django_auth_context_processor(self):
+        rf = RequestFactory()
+        request = rf.get("/")
+        request.user = self.user
+        context = auth(request)
+        self.assertIn("perms", context)
+        perms_wrapper = context["perms"]
+        # Evaluating permissions or app labels in template context must not raise AttributeError
+        self.assertFalse(perms_wrapper["accounts"])
+        self.assertFalse(perms_wrapper["accounts.view_user"])
+
+    def test_create_user_with_default_role(self):
+        user = User.objects.create_user(
+            organization=self.org,
+            email="defaultrole@org-r.com",
+            password="secret-password",
+        )
+        self.assertEqual(user.role, User.Role.STAFF)
+        self.assertTrue(user.check_password("secret-password"))
+
+    def test_get_by_natural_key(self):
+        retrieved = User.objects.get_by_natural_key(self.user.id)
+        self.assertEqual(retrieved, self.user)
+

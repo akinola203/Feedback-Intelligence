@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from core.models import BaseModel
@@ -64,3 +65,24 @@ class AuditLog(BaseModel):
 
     def __str__(self):
         return f"AuditLog({self.entity_type}:{self.entity_id}, {self.action})"
+
+    def clean(self):
+        super().clean()
+        if self.actor_user_id and self.actor_platform_admin_id:
+            raise ValidationError(
+                "Audit log cannot have both an organization user and a platform admin actor."
+            )
+        if (
+            self.actor_user_id
+            and self.organization_id
+            and self.actor_user.organization_id != self.organization_id
+        ):
+            raise ValidationError(
+                "Audit log actor_user must belong to the audit log organization."
+            )
+
+    def save(self, *args, **kwargs):
+        # Auto-derive organization from actor_user if not explicitly provided
+        if self.actor_user_id and not self.organization_id:
+            self.organization_id = self.actor_user.organization_id
+        super().save(*args, **kwargs)

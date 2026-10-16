@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
@@ -176,3 +177,27 @@ class UserBranchTests(TestCase):
                         """,
                         [str(user_a.id), str(branch_b.id), str(org_b.id)],
                     )
+
+    def test_model_string_representations(self):
+        org = Organization.objects.create(name="Str Org", slug="str-org")
+        branch = Branch.objects.create(organization=org, name="Str Branch")
+        user = User.objects.create(
+            organization=org, email="str@example.com", password="x",
+            role=User.Role.STAFF,
+        )
+        link = UserBranch.objects.create(user=user, branch=branch)
+        self.assertEqual(str(org), "Str Org")
+        self.assertEqual(str(branch), "Str Branch (Str Org)")
+        self.assertEqual(str(link), "str@example.com @ Str Branch")
+
+    def test_user_branch_clean_rejects_cross_org(self):
+        org_a = Organization.objects.create(name="Org X", slug="org-x")
+        org_b = Organization.objects.create(name="Org Y", slug="org-y")
+        user_a = User.objects.create(
+            organization=org_a, email="usera2@example.com", password="x",
+            role=User.Role.MANAGER,
+        )
+        branch_b = Branch.objects.create(organization=org_b, name="Branch Y")
+        link = UserBranch(user=user_a, branch=branch_b)
+        with self.assertRaises(ValidationError):
+            link.clean()

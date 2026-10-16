@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from core.models import BaseModel
@@ -87,6 +88,14 @@ class UserBranch(BaseModel):
 
     def __str__(self):
         return f"{self.user.email} @ {self.branch.name}"
+
+    def clean(self):
+        super().clean()
+        if hasattr(self, "user") and hasattr(self, "branch"):
+            if self.user.organization_id != self.branch.organization_id:
+                raise ValidationError(
+                    "User and Branch must belong to the same organization."
+                )
 
     def save(self, *args, **kwargs):
         # App-layer half of the guarantee (belt-and-braces); the composite
