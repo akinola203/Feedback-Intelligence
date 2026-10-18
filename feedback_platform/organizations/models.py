@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 
+from core.managers import TenantManager
 from core.models import BaseModel
 
 
@@ -32,6 +33,8 @@ class Branch(BaseModel):
     name = models.CharField(max_length=255)
     address = models.CharField(max_length=500, blank=True, null=True)
     is_active = models.BooleanField(default=True)
+
+    objects = TenantManager()
 
     class Meta:
         db_table = "branch"

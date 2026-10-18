@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import ProtectedError
 from django.test import TestCase
 
 from accounts.models import User
@@ -102,3 +103,18 @@ class ComplaintTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             note.clean()
+
+    def test_feedback_deletion_protected_when_complaint_exists(self):
+        Complaint.objects.create(
+            feedback=self.feedback, created_by=self.manager,
+        )
+        with self.assertRaises(ProtectedError):
+            self.feedback.delete()
+
+    def test_branch_deletion_protected_when_complaint_exists(self):
+        Complaint.objects.create(
+            feedback=self.feedback, created_by=self.manager,
+        )
+        with self.assertRaises(ProtectedError):
+            self.branch.delete()
+

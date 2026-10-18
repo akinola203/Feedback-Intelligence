@@ -3,6 +3,7 @@ import secrets
 from django.core.exceptions import ValidationError
 from django.db import models
 
+from core.managers import TenantManager
 from core.models import BaseModel
 from organizations.models import Branch, Organization
 
@@ -122,7 +123,7 @@ class Feedback(BaseModel):
         Organization, on_delete=models.CASCADE, related_name="feedback_items"
     )
     branch = models.ForeignKey(
-        Branch, on_delete=models.CASCADE, related_name="feedback_items"
+        Branch, on_delete=models.PROTECT, related_name="feedback_items"
     )
     category = models.ForeignKey(
         Category, on_delete=models.PROTECT, related_name="feedback_items"
@@ -136,6 +137,8 @@ class Feedback(BaseModel):
     source = models.CharField(
         max_length=20, choices=Source.choices, default=Source.QR
     )
+
+    objects = TenantManager()
 
     class Meta:
         db_table = "feedback"

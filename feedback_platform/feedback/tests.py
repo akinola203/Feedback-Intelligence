@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import ProtectedError
 from django.test import TestCase
 
 from feedback.models import Category, Feedback, QRCode
@@ -119,3 +120,13 @@ class FeedbackSentimentTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             fb.clean()
+
+    def test_branch_deletion_protected_when_feedback_exists(self):
+        Feedback.objects.create(
+            branch=self.branch,
+            category=self.category,
+            rating=5,
+        )
+        with self.assertRaises(ProtectedError):
+            self.branch.delete()
+

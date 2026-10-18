@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 
+from core.managers import TenantManager
 from core.models import BaseModel
 from organizations.models import Organization
 
@@ -45,6 +46,8 @@ class AuditLog(BaseModel):
     entity_id = models.UUIDField()
     action = models.CharField(max_length=100)
     metadata = models.JSONField(null=True, blank=True)
+
+    objects = TenantManager()
 
     class Meta:
         db_table = "audit_log"

@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 
+from core.managers import TenantManager
 from core.models import BaseModel
 from feedback.models import Feedback
 from organizations.models import Branch, Organization
@@ -31,13 +32,13 @@ class Complaint(BaseModel):
         HIGH = "high", "High"
 
     feedback = models.OneToOneField(
-        Feedback, on_delete=models.CASCADE, related_name="complaint"
+        Feedback, on_delete=models.PROTECT, related_name="complaint"
     )
     organization = models.ForeignKey(
         Organization, on_delete=models.CASCADE, related_name="complaints"
     )
     branch = models.ForeignKey(
-        Branch, on_delete=models.CASCADE, related_name="complaints"
+        Branch, on_delete=models.PROTECT, related_name="complaints"
     )
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.NEW
@@ -59,6 +60,8 @@ class Complaint(BaseModel):
     )
     resolved_at = models.DateTimeField(null=True, blank=True)
     resolution_summary = models.TextField(blank=True, null=True)
+
+    objects = TenantManager()
 
     class Meta:
         db_table = "complaint"
