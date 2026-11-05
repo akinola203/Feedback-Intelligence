@@ -109,6 +109,16 @@ class Complaint(BaseModel):
             raise ValidationError(
                 "Assigned user must belong to the complaint organization."
             )
+        if (
+            self.assigned_to_id
+            and self.branch_id
+            and self.assigned_to.role != "admin"
+        ):
+            from organizations.models import UserBranch
+            if not UserBranch.objects.filter(user_id=self.assigned_to_id, branch_id=self.branch_id).exists():
+                raise ValidationError(
+                    "Assigned user must be linked to the complaint branch."
+                )
 
     def save(self, *args, **kwargs):
         # Belt-and-braces app-layer consistency, mirroring Feedback.save()

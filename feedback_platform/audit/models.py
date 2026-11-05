@@ -89,3 +89,7 @@ class AuditLog(BaseModel):
         if self.actor_user_id and not self.organization_id:
             self.organization_id = self.actor_user.organization_id
         super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied("Audit logs are append-only and cannot be deleted.")

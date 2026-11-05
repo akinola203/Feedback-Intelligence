@@ -8,7 +8,10 @@ class TenantQuerySet(models.QuerySet):
         """
         Filters records to a specific organization.
         Accepts either an Organization instance or a UUID/string organization ID.
+        Returns empty queryset if organization is falsy or None.
         """
+        if not organization:
+            return self.none()
         org_id = getattr(organization, "id", organization)
         return self.filter(organization_id=org_id)
 

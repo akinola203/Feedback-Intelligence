@@ -1,0 +1,48 @@
+services:
+  # 1. Django Web Service (REST API)
+  - type: web
+    name: supermarket-feedback-api
+    env: python
+    region: frankfurt
+    plan: standard
+    buildCommand: |
+      cd feedback_platform
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      python manage.py collectstatic --no-input
+      python manage.py migrate --no-input
+      python manage.py seed_categories
+    startCommand: |
+      cd feedback_platform
+      gunicorn config.wsgi:application -c gunicorn.conf.py
+    healthCheckPath: /admin/login/
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: feedback-postgres-db
+          property: connectionString
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://feedback-portal.netlify.app,http://localhost:3000
+      - key: FRONTEND_SCAN_BASE_URL
+        value: https://feedback-portal.netlify.app/scan
+      - key: DJANGO_ALLOWED_HOSTS
+        value: .onrender.com,localhost,127.0.0.1
+
+databases:
+  # 2. Managed PostgreSQL Instance (v16)
+  - name: feedback-postgres-db
+    databaseName: feedback_platform
+    user: postgres_user
+    plan: standard
+    region: frankfurt
+    postgresMajorVersion: 16
+

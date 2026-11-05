@@ -98,6 +98,18 @@ class QRCode(BaseModel):
     def __str__(self):
         return f"QR({self.branch.name}, active={self.is_active})"
 
+    @classmethod
+    def rotate_for_branch(cls, branch):
+        """Atomically revokes existing active QR code for branch and issues a new active token."""
+        from django.db import transaction
+        from django.utils import timezone
+
+        with transaction.atomic():
+            cls.objects.filter(branch=branch, is_active=True).update(
+                is_active=False, revoked_at=timezone.now()
+            )
+            return cls.objects.create(branch=branch, is_active=True)
+
 
 class Feedback(BaseModel):
     """
@@ -174,12 +186,22 @@ class Feedback(BaseModel):
             raise ValidationError(
                 "Feedback branch organization does not match feedback organization."
             )
+        if self.category_id and self.organization_id:
+            if (
+                self.category.organization_id is not None
+                and self.category.organization_id != self.organization_id
+            ):
+                raise ValidationError(
+                    "Selected category does not belong to this organization or global defaults."
+                )
         if self.rating is not None and not (1 <= self.rating <= 5):
             raise ValidationError("Feedback rating must be between 1 and 5.")
 
     @staticmethod
     def derive_sentiment(rating: int) -> str:
         """MVP sentiment rule (Phase 2 §12) — no NLP, just the rating."""
+        if rating is None:
+            return Feedback.Sentiment.NEUTRAL
         if rating <= 2:
             return Feedback.Sentiment.NEGATIVE
         if rating == 3:
@@ -191,6 +213,8 @@ class Feedback(BaseModel):
         # not just the DB composite FK (Phase 2 §D.1 belt-and-braces).
         if self.branch_id and not self.organization_id:
             self.organization_id = self.branch.organization_id
-        if not self.sentiment:
+        if self.rating is not None:
             self.sentiment = self.derive_sentiment(self.rating)
+        elif not self.sentiment:
+            self.sentiment = Feedback.Sentiment.NEUTRAL
         super().save(*args, **kwargs)

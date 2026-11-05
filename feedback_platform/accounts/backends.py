@@ -80,6 +80,7 @@ class OrgScopedEmailBackend(BaseBackend):
 
     def get_user(self, user_id):
         try:
-            return User.objects.get(pk=user_id)
+            user = User.objects.select_related("organization").get(pk=user_id)
         except (User.DoesNotExist, ValueError, TypeError, ValidationError):
             return None
+        return user if self.user_can_authenticate(user) else None
