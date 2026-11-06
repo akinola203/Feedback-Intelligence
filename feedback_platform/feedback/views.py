@@ -3,6 +3,7 @@ import qrcode
 from datetime import datetime, time
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models import Avg, Case, Count, IntegerField, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -162,8 +163,15 @@ class ManagerAnalyticsView(APIView):
             branch_id__in=target_branch_ids,
         )
 
-        start_date_str = request.query_params.get("start_date")
-        end_date_str = request.query_params.get("end_date")
+        start_date_str = request.query_params.get("start_date") or ""
+        end_date_str = request.query_params.get("end_date") or ""
+
+        # Redis Cache Layer (60-second TTL to offload repeated queries)
+        branch_ids_key = "_".join(sorted(str(b) for b in target_branch_ids))
+        cache_key = f"analytics_{org.id}_{branch_ids_key}_{start_date_str}_{end_date_str}"
+        cached_data = cache.get(cache_key)
+        if cached_data is not None:
+            return Response(cached_data)
 
         if start_date_str:
             start_date = parse_date(start_date_str)
@@ -199,24 +207,27 @@ class ManagerAnalyticsView(APIView):
             .order_by("name")
         )
 
-        return Response(
-            {
-                "summary": {
-                    "total_feedback": total,
-                    "average_rating": avg_rating,
-                },
-                "sentiment": {
-                    "positive": {"count": agg["positive_count"], "percentage": calc_pct(agg["positive_count"])},
-                    "neutral": {"count": agg["neutral_count"], "percentage": calc_pct(agg["neutral_count"])},
-                    "negative": {"count": agg["negative_count"], "percentage": calc_pct(agg["negative_count"])},
-                },
-                "rating_distribution": {
-                    "5_star": {"count": agg["star_5"], "percentage": calc_pct(agg["star_5"])},
-                    "4_star": {"count": agg["star_4"], "percentage": calc_pct(agg["star_4"])},
-                    "3_star": {"count": agg["star_3"], "percentage": calc_pct(agg["star_3"])},
-                    "2_star": {"count": agg["star_2"], "percentage": calc_pct(agg["star_2"])},
-                    "1_star": {"count": agg["star_1"], "percentage": calc_pct(agg["star_1"])},
-                },
-                "branches": list(branches),
-            }
-        )
+        response_data = {
+            "summary": {
+                "total_feedback": total,
+                "average_rating": avg_rating,
+            },
+            "sentiment": {
+                "positive": {"count": agg["positive_count"], "percentage": calc_pct(agg["positive_count"])},
+                "neutral": {"count": agg["neutral_count"], "percentage": calc_pct(agg["neutral_count"])},
+                "negative": {"count": agg["negative_count"], "percentage": calc_pct(agg["negative_count"])},
+            },
+            "rating_distribution": {
+                "5_star": {"count": agg["star_5"], "percentage": calc_pct(agg["star_5"])},
+                "4_star": {"count": agg["star_4"], "percentage": calc_pct(agg["star_4"])},
+                "3_star": {"count": agg["star_3"], "percentage": calc_pct(agg["star_3"])},
+                "2_star": {"count": agg["star_2"], "percentage": calc_pct(agg["star_2"])},
+                "1_star": {"count": agg["star_1"], "percentage": calc_pct(agg["star_1"])},
+            },
+            "branches": list(branches),
+        }
+
+        # Cache response for 60 seconds
+        cache.set(cache_key, response_data, timeout=60)
+
+        return Response(response_data)
