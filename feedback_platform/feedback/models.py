@@ -209,6 +209,7 @@ class Feedback(BaseModel):
         return Feedback.Sentiment.POSITIVE
 
     def save(self, *args, **kwargs):
+        is_new = self._state.adding
         # Enforce org/branch consistency at the application layer too,
         # not just the DB composite FK (Phase 2 §D.1 belt-and-braces).
         if self.branch_id and not self.organization_id:
@@ -218,3 +219,33 @@ class Feedback(BaseModel):
         elif not self.sentiment:
             self.sentiment = Feedback.Sentiment.NEUTRAL
         super().save(*args, **kwargs)
+
+        if is_new and self.rating is not None and self.rating <= 2 and self.organization_id:
+            try:
+                from asgiref.sync import async_to_sync
+                from channels.layers import get_channel_layer
+                channel_layer = get_channel_layer()
+                if channel_layer:
+                    branch_name = self.branch.name if self.branch_id else "Unknown Branch"
+                    category_name = self.category.name if self.category_id else "General"
+                    async_to_sync(channel_layer.group_send)(
+                        f"org_{self.organization_id}_alerts",
+                        {
+                            "type": "negative_feedback_alert",
+                            "content": {
+                                "event": "negative_feedback_alert",
+                                "id": str(self.id),
+                                "branch_id": str(self.branch_id),
+                                "branch_name": branch_name,
+                                "category": category_name,
+                                "rating": self.rating,
+                                "sentiment": self.sentiment,
+                                "message": self.message or "",
+                                "customer_name": self.customer_name or "Anonymous",
+                                "created_at": self.created_at.isoformat() if getattr(self, "created_at", None) else None,
+                            },
+                        },
+                    )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("Failed to broadcast WebSocket alert: %s", e)
