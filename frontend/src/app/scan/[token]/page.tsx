@@ -26,12 +26,12 @@ interface FormState {
   customerPhone: string;
 }
 
-const RATING_DESCRIPTIONS: Record<number, { label: string; emoji: string }> = {
-  1: { label: "Very Poor", emoji: "😡" },
-  2: { label: "Poor", emoji: "🙁" },
-  3: { label: "Average", emoji: "😐" },
-  4: { label: "Good", emoji: "🙂" },
-  5: { label: "Excellent", emoji: "🤩" },
+const RATING_DESCRIPTIONS: Record<number, { label: string; tag: string }> = {
+  1: { label: "Very Poor Experience", tag: "Critical Issue" },
+  2: { label: "Below Expectations", tag: "Needs Attention" },
+  3: { label: "Average Experience", tag: "Satisfactory" },
+  4: { label: "Good Experience", tag: "Positive" },
+  5: { label: "Exceptional Service", tag: "Outstanding" },
 };
 
 export default function CustomerScanFeedbackPage() {
@@ -97,7 +97,7 @@ export default function CustomerScanFeedbackPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (formData.rating === 0) {
-      setSubmitError("Please select a star rating from 1 to 5.");
+      setSubmitError("Please select a rating from 1 to 5 stars.");
       return;
     }
     if (!formData.categoryId) {
@@ -124,7 +124,7 @@ export default function CustomerScanFeedbackPage() {
       if (error.response?.status === 429) {
         setIsRateLimited(true);
         setSubmitError(
-          "Submission rate limit exceeded. Please wait a minute before submitting again."
+          "Submission rate limit exceeded. Please wait a moment before trying again."
         );
       } else if (error.response?.status === 400) {
         setSubmitError(
@@ -141,198 +141,222 @@ export default function CustomerScanFeedbackPage() {
     }
   };
 
-  if (isLoadingMetadata) {
-    return (
-      <main className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="flex flex-col items-center space-y-4 max-w-sm text-center">
-          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-slate-600 font-medium">Verifying store location...</p>
-        </div>
-      </main>
-    );
-  }
+  return (
+    <main className="min-h-screen bg-[#F3F3F3] text-black relative flex items-center justify-center p-4 sm:p-6 overflow-hidden">
+      {/* Ambient Depth Background Blobs (Monochrome) */}
+      <div className="absolute top-1/4 -left-32 w-96 h-96 bg-neutral-300/30 rounded-full blur-3xl -z-10 pointer-events-none" />
+      <div className="absolute bottom-1/4 -right-32 w-96 h-96 bg-black/[0.04] rounded-full blur-3xl -z-10 pointer-events-none" />
+      <div className="absolute -top-20 right-1/3 w-80 h-80 bg-neutral-400/20 rounded-full blur-3xl -z-10 pointer-events-none" />
 
-  if (metadataError || !metadata) {
-    return (
-      <main className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 max-w-md w-full text-center">
-          <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
+      {/* Loading State */}
+      {isLoadingMetadata && (
+        <div className="glass-panel max-w-md w-full p-10 text-center rounded-3xl space-y-4">
+          <div className="w-10 h-10 border-2 border-black border-t-transparent rounded-full animate-spin mx-auto" />
+          <h2 className="text-base font-bold tracking-tight text-black">Verifying Location</h2>
+          <p className="text-xs text-neutral-500">Connecting securely to verified store register...</p>
+        </div>
+      )}
+
+      {/* Error State */}
+      {!isLoadingMetadata && (metadataError || !metadata) && (
+        <div className="glass-panel max-w-md w-full p-8 text-center rounded-3xl space-y-4 border border-white/80">
+          <div className="w-12 h-12 bg-black text-white rounded-2xl flex items-center justify-center mx-auto text-xl font-bold shadow-md">
             !
           </div>
-          <h1 className="text-xl font-bold text-slate-900 mb-2">
+          <h1 className="text-xl font-extrabold tracking-tight text-black">
             {isRateLimited ? "Rate Limit Exceeded" : "Store Verification Failed"}
           </h1>
-          <p className="text-slate-600 text-sm mb-6 leading-relaxed">
+          <p className="text-xs text-neutral-600 leading-relaxed max-w-xs mx-auto">
             {metadataError}
           </p>
           <button
             onClick={() => fetchStoreMetadata()}
-            className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-medium rounded-xl transition-colors duration-150 text-sm"
+            className="w-full py-3 bg-black hover:bg-neutral-800 text-white font-semibold rounded-2xl text-xs transition duration-200 active:scale-[0.99] shadow-md"
           >
             Retry Connection
           </button>
         </div>
-      </main>
-    );
-  }
+      )}
 
-  if (isSubmitted) {
-    return (
-      <main className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 max-w-md w-full text-center">
-          <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-5 text-3xl">
+      {/* Thank You State */}
+      {!isLoadingMetadata && isSubmitted && metadata && (
+        <div className="glass-panel max-w-md w-full p-8 text-center rounded-3xl space-y-5 border border-white/90">
+          <div className="w-16 h-16 bg-black text-white rounded-2xl flex items-center justify-center mx-auto text-2xl font-black shadow-lg">
             ✓
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 mb-2">Thank You!</h1>
-          <p className="text-slate-600 text-sm leading-relaxed mb-6">
-            Your feedback for{" "}
-            <span className="font-semibold text-slate-900">
-              {metadata.organization_name} ({metadata.branch_name})
-            </span>{" "}
-            has been securely recorded.
+          <div className="space-y-1">
+            <h1 className="text-2xl font-extrabold tracking-tight text-black">Thank You</h1>
+            <p className="text-xs text-neutral-500">Your direct voice helps elevate store standards</p>
+          </div>
+          <div className="glass-well p-4 rounded-2xl space-y-1 text-left">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">Recorded For</p>
+            <p className="text-sm font-bold text-black">{metadata.organization_name}</p>
+            <p className="text-xs text-neutral-600">{metadata.branch_name} Branch</p>
+          </div>
+          <p className="text-xs text-neutral-500">
+            Store leadership and floor supervisors review incoming feedback in real time.
           </p>
-          <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 text-xs text-slate-500">
-            Have a pleasant remainder of your day!
-          </div>
         </div>
-      </main>
-    );
-  }
+      )}
 
-  return (
-    <main className="min-h-screen bg-slate-50 py-8 px-4 flex justify-center items-start">
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 max-w-lg w-full overflow-hidden">
-        <div className="bg-slate-900 text-white p-6">
-          <div className="flex items-center space-x-2 text-indigo-400 text-xs font-semibold uppercase tracking-wider mb-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Verified Store Location</span>
+      {/* Main Feedback Form */}
+      {!isLoadingMetadata && !metadataError && !isSubmitted && metadata && (
+        <div className="w-full max-w-lg glass-panel rounded-3xl overflow-hidden shadow-[0_12px_48px_rgba(0,0,0,0.08)] border border-white/90 transition-all">
+          {/* Smoked Black Glass Header Banner */}
+          <div className="glass-smoked p-6 sm:p-7 border-b border-white/10 text-white space-y-1.5">
+            <div className="flex items-center space-x-2 text-[10px] uppercase font-bold tracking-widest text-neutral-300">
+              <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+              <span>Verified Store Stand</span>
+            </div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-white">
+              {metadata.organization_name}
+            </h1>
+            <p className="text-xs text-neutral-300 font-medium">
+              {metadata.branch_name} Branch
+            </p>
           </div>
-          <h1 className="text-xl font-bold">{metadata.organization_name}</h1>
-          <p className="text-slate-300 text-sm">{metadata.branch_name} Branch</p>
-        </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {submitError && (
-            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs leading-relaxed">
-              {submitError}
-            </div>
-          )}
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-900 mb-2">
-              How was your shopping experience today? <span className="text-rose-500">*</span>
-            </label>
-            <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <button
-                  key={star}
-                  type="button"
-                  onClick={() => setFormData((prev) => ({ ...prev, rating: star }))}
-                  className={`p-2 rounded-lg text-2xl transition-all transform active:scale-95 ${
-                    formData.rating >= star ? "opacity-100 scale-110" : "opacity-40 hover:opacity-75"
-                  }`}
-                  aria-label={`${star} Stars`}
-                >
-                  ⭐
-                </button>
-              ))}
-            </div>
-            {formData.rating > 0 && (
-              <p className="text-center text-xs font-medium text-slate-600 mt-2">
-                {RATING_DESCRIPTIONS[formData.rating].emoji} {RATING_DESCRIPTIONS[formData.rating].label} ({formData.rating}/5)
-              </p>
+          <form onSubmit={handleSubmit} className="p-6 sm:p-7 space-y-6">
+            {submitError && (
+              <div className="p-3.5 bg-black/[0.04] border border-black/20 rounded-2xl text-xs font-semibold text-black">
+                {submitError}
+              </div>
             )}
-          </div>
 
-          <div>
-            <label htmlFor="category" className="block text-sm font-semibold text-slate-900 mb-1.5">
-              Primary Category <span className="text-rose-500">*</span>
-            </label>
-            <select
-              id="category"
-              value={formData.categoryId}
-              onChange={(e) => setFormData((prev) => ({ ...prev, categoryId: e.target.value }))}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              required
-            >
-              <option value="" disabled>Select an area of feedback...</option>
-              {metadata.categories.map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))}
-            </select>
-          </div>
+            {/* Star Rating Bar */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-black">
+                Overall Experience <span className="text-neutral-400">*</span>
+              </label>
 
-          <div>
-            <label htmlFor="message" className="block text-sm font-semibold text-slate-900 mb-1.5">
-              Your Comments
-            </label>
-            <textarea
-              id="message"
-              rows={3}
-              value={formData.message}
-              onChange={(e) => setFormData((prev) => ({ ...prev, message: e.target.value }))}
-              placeholder="Tell us what went well or what we can improve..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              maxLength={1000}
-            />
-            <div className="text-right text-[11px] text-slate-400 mt-1">
-              {formData.message.length}/1000 characters
+              <div className="glass-well p-3 rounded-2xl flex justify-between items-center px-4">
+                {[1, 2, 3, 4, 5].map((star) => {
+                  const isSelected = formData.rating >= star;
+                  return (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setFormData((prev) => ({ ...prev, rating: star }))}
+                      className="group p-2 transition-all duration-150 transform hover:-translate-y-0.5 active:scale-95"
+                      aria-label={`${star} Stars`}
+                    >
+                      <span
+                        className={`text-2xl sm:text-3xl transition-all ${
+                          isSelected
+                            ? "text-black drop-shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+                            : "text-neutral-300 group-hover:text-neutral-400"
+                        }`}
+                      >
+                        ★
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {formData.rating > 0 && (
+                <div className="flex items-center justify-between px-1 text-xs">
+                  <span className="font-bold text-black">
+                    {RATING_DESCRIPTIONS[formData.rating].label}
+                  </span>
+                  <span className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">
+                    {RATING_DESCRIPTIONS[formData.rating].tag} ({formData.rating}/5)
+                  </span>
+                </div>
+              )}
             </div>
-          </div>
 
-          <div className="pt-2 border-t border-slate-100">
-            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-              Optional Follow-Up Information
-            </h3>
-            <div className="space-y-3">
+            {/* Category Dropdown */}
+            <div className="space-y-1.5">
+              <label htmlFor="category" className="block text-xs font-bold uppercase tracking-wider text-black">
+                Primary Category <span className="text-neutral-400">*</span>
+              </label>
+              <select
+                id="category"
+                value={formData.categoryId}
+                onChange={(e) => setFormData((prev) => ({ ...prev, categoryId: e.target.value }))}
+                className="w-full glass-input rounded-2xl px-4 py-3 text-xs font-medium focus:ring-1 focus:ring-black"
+                required
+              >
+                <option value="" disabled>Select area of observation...</option>
+                {metadata.categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Comments Area */}
+            <div className="space-y-1.5">
+              <label htmlFor="message" className="block text-xs font-bold uppercase tracking-wider text-black">
+                Detailed Feedback
+              </label>
+              <textarea
+                id="message"
+                rows={3}
+                value={formData.message}
+                onChange={(e) => setFormData((prev) => ({ ...prev, message: e.target.value }))}
+                placeholder="Share any highlights, product issues, or store observations..."
+                className="w-full glass-input rounded-2xl p-4 text-xs font-medium placeholder-neutral-400"
+                maxLength={1000}
+              />
+              <div className="text-right text-[10px] text-neutral-400 font-mono">
+                {formData.message.length} / 1000
+              </div>
+            </div>
+
+            {/* Optional Customer Contact Section */}
+            <div className="pt-4 border-t border-black/[0.08] space-y-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+                Optional Follow-Up Details
+              </p>
               <input
                 type="text"
-                placeholder="Full Name (optional)"
+                placeholder="Your Name (optional)"
                 value={formData.customerName}
                 onChange={(e) => setFormData((prev) => ({ ...prev, customerName: e.target.value }))}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full glass-input rounded-2xl px-4 py-2.5 text-xs placeholder-neutral-400"
               />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input
                   type="email"
-                  placeholder="Email Address (optional)"
+                  placeholder="Email Address"
                   value={formData.customerEmail}
                   onChange={(e) => setFormData((prev) => ({ ...prev, customerEmail: e.target.value }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full glass-input rounded-2xl px-4 py-2.5 text-xs placeholder-neutral-400"
                 />
                 <input
                   type="tel"
-                  placeholder="Phone Number (optional)"
+                  placeholder="Phone Number"
                   value={formData.customerPhone}
                   onChange={(e) => setFormData((prev) => ({ ...prev, customerPhone: e.target.value }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full glass-input rounded-2xl px-4 py-2.5 text-xs placeholder-neutral-400"
                 />
               </div>
-              <p className="text-[11px] text-slate-400 leading-tight">
-                🔒 Privacy Guarantee: Under the NDPR, contact details are kept strictly confidential.
+              <p className="text-[10px] text-neutral-500 font-medium">
+                🔒 Privacy Guarantee: Under NDPR regulations, contact info remains strictly confidential.
               </p>
             </div>
-          </div>
 
-          <button
-            type="submit"
-            disabled={isSubmitting || isRateLimited}
-            className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-semibold rounded-xl transition-all shadow-sm active:scale-[0.99] text-sm flex items-center justify-center space-x-2"
-          >
-            {isSubmitting ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Submitting Feedback...</span>
-              </>
-            ) : (
-              <span>Submit Feedback</span>
-            )}
-          </button>
-        </form>
-      </div>
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={isSubmitting || isRateLimited}
+              className="w-full py-3.5 bg-black hover:bg-neutral-800 disabled:bg-neutral-300 text-white font-bold rounded-2xl text-xs transition duration-200 shadow-xl hover:-translate-y-0.5 active:scale-[0.99] flex items-center justify-center space-x-2"
+            >
+              {isSubmitting ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Recording Submission...</span>
+                </>
+              ) : (
+                <span>Submit Feedback</span>
+              )}
+            </button>
+          </form>
+        </div>
+      )}
     </main>
   );
 }
-

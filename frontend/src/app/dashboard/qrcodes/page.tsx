@@ -52,9 +52,9 @@ export default function QRCodesPage() {
 
       setNotification({
         type: "success",
-        message: `Printable PNG QR code for "${branch.name}" downloaded successfully.`,
+        message: `High-resolution PNG QR stand for "${branch.name}" downloaded successfully.`,
       });
-    } catch (err: any) {
+    } catch {
       setNotification({
         type: "error",
         message: "Failed to download QR code image. Please check your branch permissions.",
@@ -66,7 +66,7 @@ export default function QRCodesPage() {
 
   const handleRotateQR = async (branch: Branch) => {
     const confirmed = window.confirm(
-      `⚠️ Warning: Are you sure you want to rotate the QR code for "${branch.name}"?\n\nThe existing printed QR code in the store will immediately become invalid and stop accepting feedback.`
+      `⚠️ Revocation Warning: Are you sure you want to rotate the QR code for "${branch.name}"?\n\nThe existing printed QR stand in the supermarket will immediately become invalid and stop accepting feedback.`
     );
     if (!confirmed) return;
 
@@ -86,9 +86,9 @@ export default function QRCodesPage() {
 
       setNotification({
         type: "success",
-        message: `QR code token rotated successfully for "${branch.name}". Download and print the new QR code below.`,
+        message: `Active QR token rotated successfully for "${branch.name}". Download and print the new stand below.`,
       });
-    } catch (err: any) {
+    } catch {
       setNotification({
         type: "error",
         message: "Failed to rotate QR code. Please verify your permissions.",
@@ -101,18 +101,20 @@ export default function QRCodesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Branch QR Code Management</h1>
-        <p className="text-slate-500 text-sm">
-          Download high-resolution printable QR codes for customer scan stands and rotate tokens securely
+        <h1 className="text-3xl font-extrabold tracking-tight text-black">
+          Branch QR Code Stands
+        </h1>
+        <p className="text-xs text-neutral-500 font-medium mt-0.5">
+          Generate high-resolution printable QR codes for store customer scan stands and rotate tokens securely
         </p>
       </div>
 
       {notification && (
         <div
-          className={`p-4 rounded-xl text-xs font-medium border ${
+          className={`p-4 rounded-2xl text-xs font-bold border transition ${
             notification.type === "success"
-              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-              : "bg-rose-50 border-rose-200 text-rose-800"
+              ? "bg-black text-white border-black shadow-md"
+              : "bg-white text-black border-black/30"
           }`}
         >
           {notification.message}
@@ -120,21 +122,24 @@ export default function QRCodesPage() {
       )}
 
       {lastRotated && (
-        <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 space-y-2">
-          <div className="flex items-center space-x-2 text-indigo-900 font-bold text-sm">
+        <div className="glass-panel p-6 rounded-3xl space-y-2 border border-white/90 shadow-md">
+          <div className="flex items-center space-x-2 text-black font-extrabold text-sm">
             <span>✨</span>
             <span>New Active QR Token Generated</span>
           </div>
-          <p className="text-xs text-indigo-700">
-            Active Token: <code className="bg-white px-2 py-0.5 rounded font-mono font-bold">{lastRotated.token}</code>
+          <p className="text-xs text-neutral-700">
+            Active Token:{" "}
+            <code className="bg-black text-white px-2.5 py-0.5 rounded-lg font-mono font-bold text-[11px]">
+              {lastRotated.token}
+            </code>
           </p>
-          <p className="text-xs text-indigo-700">
-            Direct Scan URL:{" "}
+          <p className="text-xs text-neutral-600">
+            Direct Customer Scan URL:{" "}
             <a
               href={lastRotated.scanUrl}
               target="_blank"
               rel="noreferrer"
-              className="text-indigo-600 underline font-medium hover:text-indigo-800"
+              className="text-black underline font-bold hover:text-neutral-600"
             >
               {lastRotated.scanUrl} ↗
             </a>
@@ -142,55 +147,57 @@ export default function QRCodesPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="glass-panel rounded-3xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.04)] border border-white/80">
         {isLoading ? (
-          <div className="p-8 text-center text-slate-400 text-sm animate-pulse">
+          <div className="p-12 text-center text-xs text-neutral-400 font-semibold animate-pulse">
             Loading assigned branches...
           </div>
         ) : branches.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 text-sm">
+          <div className="p-12 text-center text-xs text-neutral-400">
             No assigned supermarket branches found for your account.
           </div>
         ) : (
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-black/[0.04]">
             {branches.map((b) => (
               <div
                 key={b.id}
-                className="p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-slate-50/60 transition"
+                className="p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-white/80 transition duration-150"
               >
                 <div className="space-y-1">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-lg">🏪</span>
-                    <h3 className="text-base font-bold text-slate-900">{b.name}</h3>
+                  <div className="flex items-center space-x-2.5">
+                    <span className="w-8 h-8 rounded-xl bg-black text-white flex items-center justify-center text-xs font-bold shadow-sm">
+                      QR
+                    </span>
+                    <h3 className="text-base font-extrabold tracking-tight text-black">{b.name}</h3>
                     <span
-                      className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
+                      className={`text-[9px] uppercase font-black px-2.5 py-0.5 rounded-full border ${
                         b.is_active
-                          ? "bg-emerald-100 text-emerald-800"
-                          : "bg-slate-100 text-slate-600"
+                          ? "bg-black text-white border-black"
+                          : "bg-neutral-100 text-neutral-400 border-neutral-200"
                       }`}
                     >
-                      {b.is_active ? "Active Branch" : "Inactive"}
+                      {b.is_active ? "Active Stand" : "Inactive"}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400 font-mono">Branch ID: {b.id}</p>
+                  <p className="text-[11px] text-neutral-400 font-mono">Branch ID: {b.id}</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     onClick={() => handleDownloadQR(b)}
                     disabled={downloadingBranchId === b.id}
-                    className="flex items-center space-x-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white rounded-xl text-xs font-semibold shadow-sm transition"
+                    className="flex items-center space-x-2 px-4 py-2.5 bg-black hover:bg-neutral-800 disabled:bg-neutral-300 text-white rounded-2xl text-xs font-bold shadow-lg hover:-translate-y-0.5 active:scale-95 transition"
                   >
                     <span>📥</span>
                     <span>
-                      {downloadingBranchId === b.id ? "Downloading..." : "Download Printable QR"}
+                      {downloadingBranchId === b.id ? "Generating..." : "Download Printable PNG"}
                     </span>
                   </button>
 
                   <button
                     onClick={() => handleRotateQR(b)}
                     disabled={rotatingBranchId === b.id}
-                    className="flex items-center space-x-1.5 px-3.5 py-2 bg-white hover:bg-rose-50 text-rose-700 hover:text-rose-800 border border-rose-200 rounded-xl text-xs font-semibold transition"
+                    className="flex items-center space-x-1.5 px-3.5 py-2.5 bg-white/70 hover:bg-white text-black border border-black/20 hover:border-black rounded-2xl text-xs font-bold transition active:scale-95 shadow-sm"
                   >
                     <span>🔄</span>
                     <span>

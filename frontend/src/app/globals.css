@@ -3,12 +3,98 @@
 @tailwind utilities;
 
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #f3f3f3;
+  --foreground: #000000;
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-attachment: fixed;
+  overflow-x: hidden;
+}
+
+/* Glassmorphism Design Tokens */
+@layer components {
+  /* Frosted White Glass Panel */
+  .glass-panel {
+    background-color: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
+
+  /* Deep Frosted White Panel for Overlays/Drawers */
+  .glass-panel-deep {
+    background-color: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(32px);
+    -webkit-backdrop-filter: blur(32px);
+    border: 1px solid rgba(255, 255, 255, 0.95);
+    box-shadow: 0 20px 50px 0 rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 1);
+  }
+
+  /* Recessed Glass Well */
+  .glass-well {
+    background-color: rgba(0, 0, 0, 0.03);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.04);
+  }
+
+  /* Smoked Black Glass Accent */
+  .glass-smoked {
+    background-color: rgba(10, 10, 10, 0.88);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+
+  /* Interactive Glass Inputs */
+  .glass-input {
+    background-color: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    color: #000000;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .glass-input:focus {
+    background-color: rgba(255, 255, 255, 0.95);
+    border-color: #000000;
+    box-shadow: 0 0 0 1px #000000, 0 4px 16px rgba(0, 0, 0, 0.05);
+    outline: none;
+  }
+
+  /* High-Contrast Diagonal Striped Bar for Negative Sentinel */
+  .striped-bar-negative {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      #171717,
+      #171717 6px,
+      #262626 6px,
+      #262626 12px
+    );
+  }
+}
+
+/* Custom Scrollbar for Sleek Minimalist Feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.35);
 }
