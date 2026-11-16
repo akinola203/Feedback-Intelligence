@@ -35,7 +35,30 @@ class OrgScopedEmailBackend(BaseBackend):
     organization.
     """
 
-    def authenticate(self, request, organization=None, email=None, password=None, **kwargs):
+    def authenticate(self, request, organization=None, email=None, password=None, username=None, **kwargs):
+        if organization is None:
+            # Allow staff/superuser authentication via Django admin (which passes username/password)
+            lookup_val = email or username
+            if not lookup_val or password is None:
+                return None
+            normalized_val = lookup_val.strip().lower()
+            try:
+                user = User.objects.filter(
+                    email__iexact=normalized_val,
+                    is_staff=True,
+                ).first()
+            except Exception:
+                user = None
+
+            if not user:
+                User().set_password(password)
+                return None
+
+            if not user.check_password(password) or not self.user_can_authenticate(user):
+                return None
+
+            return user
+
         if not isinstance(organization, Organization) or not email or password is None:
             # Missing or invalid organization context, or missing
             # credentials: reject without touching the database, so an

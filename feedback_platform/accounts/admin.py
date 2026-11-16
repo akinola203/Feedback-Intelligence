@@ -13,7 +13,7 @@ class PlatformAdminAdmin(admin.ModelAdmin):
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ("email", "organization", "role", "is_active", "created_at")
-    list_filter = ("role", "is_active", "organization")
-    search_fields = ("email", "organization__name", "organization__slug")
+    list_display = ("email", "full_name", "organization", "role", "is_staff", "is_superuser", "is_active", "created_at")
+    list_filter = ("role", "is_staff", "is_superuser", "is_active", "organization")
+    search_fields = ("email", "full_name", "organization__name", "organization__slug")
     readonly_fields = ("password", "last_login", "created_at")

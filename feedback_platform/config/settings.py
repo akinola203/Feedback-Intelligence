@@ -146,6 +146,24 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 ASGI_APPLICATION = 'config.asgi.application'
 
+REDIS_URL = os.environ.get("REDIS_URL")
+
+# Caches configuration (Redis in production, LocMemCache in dev/test)
+if "test" in sys.argv or any("pytest" in arg for arg in sys.argv) or not REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "feedback-platform-cache",
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+
 # Channel Layers for Django Channels / WebSockets
 if "test" in sys.argv or any("pytest" in arg for arg in sys.argv):
     CHANNEL_LAYERS = {
@@ -153,7 +171,16 @@ if "test" in sys.argv or any("pytest" in arg for arg in sys.argv):
             "BACKEND": "channels.layers.InMemoryChannelLayer",
         }
     }
-else:
+elif REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
+        },
+    }
+elif os.environ.get("REDIS_HOST"):
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -161,6 +188,12 @@ else:
                 "hosts": [(os.environ.get("REDIS_HOST", "127.0.0.1"), int(os.environ.get("REDIS_PORT", 6379)))],
             },
         },
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
     }
 
 

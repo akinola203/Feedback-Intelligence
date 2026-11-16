@@ -135,6 +135,45 @@ class DownloadQRCodeView(APIView):
         return response
 
 
+class RotateQRCodeView(APIView):
+    """
+    Revokes the current active QR code for a branch and generates a fresh token.
+    Restricted to authenticated managers/staff assigned to the branch or org admins.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, branch_id):
+        user = request.user
+        org = user.organization
+        if not org:
+            raise PermissionDenied("User does not belong to an organization.")
+
+        branch = get_object_or_404(Branch, id=branch_id, organization=org, is_active=True)
+
+        if user.role != User.Role.ADMIN and not user.is_staff and not user.is_superuser:
+            if not UserBranch.objects.filter(user=user, branch=branch).exists():
+                raise PermissionDenied("You do not have permission to rotate QR codes for this branch.")
+
+        new_qr = QRCode.rotate_for_branch(branch)
+        frontend_base_url = getattr(settings, "FRONTEND_SCAN_BASE_URL", "http://localhost:3000/scan")
+        scan_url = f"{frontend_base_url.rstrip('/')}/{new_qr.token}"
+
+        return Response(
+            {
+                "message": "QR code rotated successfully.",
+                "id": str(new_qr.id),
+                "token": new_qr.token,
+                "scan_url": scan_url,
+                "branch_id": str(branch.id),
+                "branch_name": branch.name,
+                "created_at": new_qr.created_at.isoformat(),
+                "is_active": new_qr.is_active,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class ManagerAnalyticsView(APIView):
     """
     Aggregates feedback metrics, sentiment distributions, and rating statistics

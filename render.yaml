@@ -14,7 +14,7 @@ services:
       python manage.py seed_categories
     startCommand: |
       cd feedback_platform
-      gunicorn config.wsgi:application -c gunicorn.conf.py
+      daphne -b 0.0.0.0 -p 10000 config.asgi:application
     healthCheckPath: /admin/login/
     autoDeploy: true
     envVars:
@@ -30,12 +30,25 @@ services:
         fromDatabase:
           name: feedback-postgres-db
           property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: feedback-redis
+          property: connectionString
       - key: CORS_ALLOWED_ORIGINS
         value: https://feedback-portal.netlify.app,http://localhost:3000
       - key: FRONTEND_SCAN_BASE_URL
         value: https://feedback-portal.netlify.app/scan
       - key: DJANGO_ALLOWED_HOSTS
         value: .onrender.com,localhost,127.0.0.1
+
+  # 2. Managed Redis Instance
+  - type: redis
+    name: feedback-redis
+    region: frankfurt
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
 
 databases:
   # 2. Managed PostgreSQL Instance (v16)

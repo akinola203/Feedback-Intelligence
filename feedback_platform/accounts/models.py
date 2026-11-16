@@ -77,6 +77,27 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
+    def create_superuser(self, email, password=None, organization=None, **extra_fields):
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+        extra_fields.setdefault("role", self.model.Role.ADMIN)
+
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError("Superuser must have is_staff=True.")
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError("Superuser must have is_superuser=True.")
+
+        if organization is None:
+            from organizations.models import Organization
+            organization, _ = Organization.objects.get_or_create(
+                slug="system-admin",
+                defaults={"name": "System Administration", "is_active": True},
+            )
+
+        return self.create_user(
+            organization=organization, email=email, password=password, **extra_fields
+        )
+
 
 class User(BaseModel, AbstractBaseUser):
     """
@@ -125,11 +146,14 @@ class User(BaseModel, AbstractBaseUser):
         Organization, on_delete=models.CASCADE, related_name="users"
     )
     email = models.EmailField()
+    full_name = models.CharField(max_length=255, blank=True, default="")
     role = models.CharField(max_length=20, choices=Role.choices)
     is_active = models.BooleanField(default=True)
+    is_staff = models.BooleanField(default=False)
+    is_superuser = models.BooleanField(default=False)
 
     USERNAME_FIELD = "id"
-    REQUIRED_FIELDS = []
+    REQUIRED_FIELDS = ["email"]
 
     objects = UserManager()
 
@@ -160,23 +184,14 @@ class User(BaseModel, AbstractBaseUser):
     def __str__(self):
         return f"{self.email} ({self.organization.slug}, {self.role})"
 
-    @property
-    def is_staff(self):
-        return False
-
-    @property
-    def is_superuser(self):
-        return False
-
     def has_perm(self, perm, obj=None):
-        return False
+        return self.is_active and (self.is_superuser or self.is_staff)
 
     def has_perms(self, perm_list, obj=None):
-        return False
+        return all(self.has_perm(perm, obj) for perm in perm_list)
 
     def has_module_perms(self, app_label):
-        return False
-
+        return self.is_active and (self.is_superuser or self.is_staff)
     def get_all_permissions(self, obj=None):
         return set()
 
