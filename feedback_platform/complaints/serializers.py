@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from accounts.models import User
+from organizations.models import UserBranch
 from .models import Complaint, ComplaintNote
 
 
@@ -46,7 +48,31 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "feedback",
             "branch",
             "created_by_email",
+            "resolved_at",
             "created_at",
             "notes",
         ]
 
+    def validate_assigned_to(self, value):
+        if value is None:
+            return value
+
+        request = self.context.get("request")
+        org_id = getattr(getattr(request, "user", None), "organization_id", None)
+        if self.instance is not None:
+            org_id = self.instance.organization_id
+
+        if not value.is_active or (org_id and value.organization_id != org_id):
+            raise serializers.ValidationError(
+                "Assigned user must be an active member of this organization."
+            )
+
+        if self.instance is not None and value.role != User.Role.ADMIN:
+            if not UserBranch.objects.filter(
+                user=value, branch_id=self.instance.branch_id
+            ).exists():
+                raise serializers.ValidationError(
+                    "Assigned user must be authorized for this branch."
+                )
+
+        return value

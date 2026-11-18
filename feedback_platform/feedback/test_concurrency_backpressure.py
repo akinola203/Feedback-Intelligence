@@ -85,7 +85,7 @@ class ConcurrencyAndBackpressureTests(TestCase):
                 response = self.client.post(url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        mock_send.assert_called_once()
+        self.assertEqual(mock_send.call_count, 2)
         self.assertTrue(
             Feedback.objects.filter(
                 id=response.data["id"],
@@ -112,7 +112,7 @@ class ConcurrencyAndBackpressureTests(TestCase):
                 response = self.client.post(url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        mock_send.assert_called_once()
+        self.assertEqual(mock_send.call_count, 2)
         self.assertTrue(Feedback.objects.filter(id=response.data["id"]).exists())
 
     def test_public_submit_succeeds_on_broadcast_timeout(self):
@@ -131,7 +131,7 @@ class ConcurrencyAndBackpressureTests(TestCase):
                 response = self.client.post(url, payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        mock_send.assert_called_once()
+        self.assertEqual(mock_send.call_count, 2)
         self.assertTrue(Feedback.objects.filter(id=response.data["id"]).exists())
 
     # ------------------------------------------------------------------
@@ -179,9 +179,11 @@ class ConcurrencyAndBackpressureTests(TestCase):
             for cb in callbacks:
                 cb()
 
-            mock_send.assert_called_once()
-            group_name, payload = mock_send.call_args[0]
-            self.assertEqual(group_name, f"org_{self.org.id}_alerts")
+            self.assertEqual(mock_send.call_count, 2)
+            sent_groups = [c.args[0] for c in mock_send.call_args_list]
+            self.assertIn(f"org_{self.org.id}_alerts", sent_groups)
+            self.assertIn(f"branch_{self.branch.id}_alerts", sent_groups)
+            _, payload = mock_send.call_args_list[0][0]
             self.assertEqual(payload["content"]["rating"], 1)
 
     # ------------------------------------------------------------------
@@ -374,12 +376,18 @@ class WebSocketBackpressureAndZombieTests(TransactionTestCase):
             slug="freshmart-ws",
             is_active=True,
         )
+        self.branch = Branch.objects.create(
+            organization=self.org,
+            name="Lekki WS Branch",
+            is_active=True,
+        )
         self.manager = User.objects.create_user(
             organization=self.org,
             email="ws.manager@freshmart.ng",
             password="Password123!",
             role=User.Role.MANAGER,
         )
+        UserBranch.objects.create(user=self.manager, branch=self.branch)
 
     def test_websocket_heartbeat_ping_pong_and_zombie_revocation(self):
         async def _run():
@@ -446,13 +454,17 @@ class WebSocketBackpressureAndZombieTests(TransactionTestCase):
 
             await _suspend_org()
 
-            # Dispatch alert to group: consumer must NOT forward alert and must close socket
+            # Dispatch alert to manager's branch group: consumer must NOT forward alert and must close socket
             channel_layer = get_channel_layer()
             await channel_layer.group_send(
-                f"org_{self.org.id}_alerts",
+                f"branch_{self.branch.id}_alerts",
                 {
                     "type": "negative_feedback_alert",
-                    "content": {"event": "negative_feedback_alert", "rating": 1},
+                    "content": {
+                        "event": "negative_feedback_alert",
+                        "branch_id": str(self.branch.id),
+                        "rating": 1,
+                    },
                 },
             )
             output = await communicator.receive_output(timeout=2)

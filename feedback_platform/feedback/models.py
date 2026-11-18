@@ -308,7 +308,10 @@ class Feedback(BaseModel):
                 # Extract plain scalars before commit so on_commit does zero ORM/DB I/O
                 branch_name = self.branch.name if self.branch_id else "Unknown Branch"
                 category_name = self.category.name if self.category_id else "General"
-                group_name = f"org_{org_id}_alerts"
+                target_groups = [f"org_{org_id}_alerts"]
+                if branch_id:
+                    target_groups.append(f"branch_{branch_id}_alerts")
+
                 alert_payload = {
                     "type": "negative_feedback_alert",
                     "content": {
@@ -328,8 +331,9 @@ class Feedback(BaseModel):
                         ),
                     },
                 }
-                transaction.on_commit(
-                    lambda grp=group_name, data=alert_payload: _dispatch_negative_feedback_alert(
-                        grp, data
-                    )
-                )
+
+                def _emit_to_authorized_groups(groups=target_groups, data=alert_payload):
+                    for grp in groups:
+                        _dispatch_negative_feedback_alert(grp, data)
+
+                transaction.on_commit(_emit_to_authorized_groups)

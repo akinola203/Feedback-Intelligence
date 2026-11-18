@@ -16,9 +16,15 @@ from .serializers import ComplaintNoteSerializer, ComplaintSerializer
 
 def get_accessible_branch_ids(user: User):
     """Returns list of branch UUIDs the user is authorized to view or manage."""
+    if not getattr(user, "organization_id", None):
+        return []
     if user.role == User.Role.ADMIN:
         return list(user.organization.branches.filter(is_active=True).values_list("id", flat=True))
-    return list(UserBranch.objects.filter(user=user).values_list("branch_id", flat=True))
+    return list(
+        UserBranch.objects.filter(
+            user=user, branch__organization=user.organization, branch__is_active=True
+        ).values_list("branch_id", flat=True)
+    )
 
 
 class ComplaintListCreateView(generics.ListCreateAPIView):

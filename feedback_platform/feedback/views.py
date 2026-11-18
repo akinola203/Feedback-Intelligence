@@ -1,10 +1,14 @@
+import hashlib
 import io
 import time as time_mod
-import qrcode
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone as dt_timezone
+from xml.sax.saxutils import escape as xml_escape
+from zoneinfo import ZoneInfo
 
+import qrcode
 from django.conf import settings
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Avg, Case, Count, IntegerField, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -14,7 +18,7 @@ from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle
+from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
 
 from reportlab.lib.pagesizes import letter
@@ -33,27 +37,55 @@ from .cache import (
 from .models import Category, Feedback, QRCode
 from .serializers import PublicFeedbackSubmissionSerializer
 
+FEEDBACK_DEDUP_TTL_SECONDS = 30
+MAX_PDF_EXPORT_ROWS = 25
+
+
+def _get_client_ip(request) -> str:
+    xff = request.META.get("HTTP_X_FORWARDED_FOR")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "unknown")
+
 
 class PublicFeedbackThrottle(AnonRateThrottle):
     scope = "public_feedback"
     rate = "10/minute"
 
 
+class PublicFeedbackTokenThrottle(SimpleRateThrottle):
+    """Per-QR-token rate limiter to defend a single store stand against distributed floods."""
+    scope = "public_feedback_token"
+
+    def get_cache_key(self, request, view):
+        token = view.kwargs.get("token")
+        if not token:
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": token}
+
+
+class PDFExportThrottle(UserRateThrottle):
+    scope = "pdf_export"
+
+
 class PublicFeedbackSubmitView(APIView):
     """
     Public anonymous customer feedback submission endpoint.
     GET: Returns verified store branch metadata and available categories.
-    POST: Records customer feedback mapped directly to the branch identified by QR token.
+    POST: Records customer feedback atomically with idempotency deduplication
+          to prevent mobile double-taps from creating duplicate rows or alerts.
     """
 
     permission_classes = [AllowAny]
-    throttle_classes = [PublicFeedbackThrottle]
+    throttle_classes = [PublicFeedbackThrottle, PublicFeedbackTokenThrottle]
 
     def get(self, request, token):
         qr_obj = get_object_or_404(
             QRCode.objects.select_related("branch__organization"),
             token=token,
             is_active=True,
+            branch__is_active=True,
+            branch__organization__is_active=True,
         )
         categories = Category.objects.filter(
             organization__in=[None, qr_obj.branch.organization_id],
@@ -75,6 +107,8 @@ class PublicFeedbackSubmitView(APIView):
             QRCode.objects.select_related("branch__organization"),
             token=token,
             is_active=True,
+            branch__is_active=True,
+            branch__organization__is_active=True,
         )
 
         serializer = PublicFeedbackSubmissionSerializer(data=request.data)
@@ -90,20 +124,60 @@ class PublicFeedbackSubmitView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        feedback = serializer.save(
-            branch=qr_obj.branch,
-            organization=qr_obj.branch.organization,
-            source=Feedback.Source.QR,
-        )
+        # Short-window idempotency deduplication (supports explicit Idempotency-Key
+        # or content fingerprint over [ip, branch_id, rating, comment_hash]).
+        explicit_idem_key = (request.headers.get("Idempotency-Key") or "").strip()
+        if explicit_idem_key:
+            fingerprint = hashlib.sha256(
+                f"{qr_obj.branch_id}:{explicit_idem_key}".encode("utf-8")
+            ).hexdigest()
+        else:
+            client_ip = _get_client_ip(request)
+            rating_val = serializer.validated_data["rating"]
+            normalized_msg = (serializer.validated_data.get("message") or "").strip().lower()
+            comment_hash = hashlib.sha256(normalized_msg.encode("utf-8")).hexdigest()
+            fingerprint = hashlib.sha256(
+                f"{client_ip}:{qr_obj.branch_id}:{rating_val}:{comment_hash}".encode("utf-8")
+            ).hexdigest()
 
-        return Response(
-            {
-                "message": "Feedback submitted successfully.",
-                "id": str(feedback.id),
-                "sentiment": feedback.sentiment,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        dedup_lock_key = f"fb_dedup_lock:{fingerprint}"
+        dedup_resp_key = f"fb_dedup_resp:{fingerprint}"
+
+        if not cache.add(dedup_lock_key, "1", timeout=FEEDBACK_DEDUP_TTL_SECONDS):
+            cached_resp = cache.get(dedup_resp_key)
+            if cached_resp is not None:
+                resp = Response(cached_resp, status=status.HTTP_201_CREATED)
+                resp["X-Idempotent-Replay"] = "true"
+                return resp
+            resp = Response(
+                {
+                    "message": "Feedback already received and is being processed.",
+                    "duplicate": True,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+            resp["X-Idempotent-Replay"] = "true"
+            return resp
+
+        try:
+            with transaction.atomic():
+                feedback = serializer.save(
+                    branch=qr_obj.branch,
+                    organization=qr_obj.branch.organization,
+                    source=Feedback.Source.QR,
+                )
+        except Exception:
+            cache.delete(dedup_lock_key)
+            raise
+
+        response_payload = {
+            "message": "Feedback submitted successfully.",
+            "id": str(feedback.id),
+            "sentiment": feedback.sentiment,
+        }
+        cache.set(dedup_resp_key, response_payload, timeout=FEEDBACK_DEDUP_TTL_SECONDS)
+
+        return Response(response_payload, status=status.HTTP_201_CREATED)
 
 
 class DownloadQRCodeView(APIView):
@@ -116,6 +190,8 @@ class DownloadQRCodeView(APIView):
 
     def get(self, request, branch_id):
         user = request.user
+        if not getattr(user, "organization_id", None):
+            raise PermissionDenied("User does not belong to an organization.")
         org = user.organization
 
         branch = get_object_or_404(Branch, id=branch_id, organization=org, is_active=True)
@@ -205,11 +281,15 @@ class ManagerAnalyticsView(APIView):
         if start_date_str:
             start_date = parse_date(start_date_str)
             if start_date:
-                queryset = queryset.filter(created_at__gte=datetime.combine(start_date, time.min))
+                queryset = queryset.filter(
+                    created_at__gte=datetime.combine(start_date, time.min, tzinfo=dt_timezone.utc)
+                )
         if end_date_str:
             end_date = parse_date(end_date_str)
             if end_date:
-                queryset = queryset.filter(created_at__lte=datetime.combine(end_date, time.max))
+                queryset = queryset.filter(
+                    created_at__lte=datetime.combine(end_date, time.max, tzinfo=dt_timezone.utc)
+                )
 
         agg = queryset.aggregate(
             total_count=Count("id"),
@@ -264,6 +344,8 @@ class ManagerAnalyticsView(APIView):
 
     def get(self, request):
         user = request.user
+        if not getattr(user, "organization_id", None):
+            raise PermissionDenied("You must belong to an organization to view analytics.")
         org = user.organization
 
         if user.role == User.Role.ADMIN:
@@ -272,7 +354,9 @@ class ManagerAnalyticsView(APIView):
             )
         else:
             accessible_branch_ids = list(
-                UserBranch.objects.filter(user=user).values_list("branch_id", flat=True)
+                UserBranch.objects.filter(
+                    user=user, branch__organization=org, branch__is_active=True
+                ).values_list("branch_id", flat=True)
             )
 
         requested_branch_id = request.query_params.get("branch_id")
@@ -342,9 +426,15 @@ class DownloadExecutivePDFReportView(APIView):
     """
     Generates and downloads an executive PDF analytics summary report using ReportLab.
     Strictly scoped to the authenticated user's organization and assigned branch permissions.
+
+    Hardened against:
+    - ReportLab Paragraph XML/SSRF injection via strict `xml.sax.saxutils.escape`.
+    - Export DoS / RAM exhaustion via per-user concurrency locks, throttling, and row caps.
+    - Timezone skew via UTC DB queries and `Africa/Lagos` display formatting.
     """
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [PDFExportThrottle]
 
     def get(self, request):
         user = request.user
@@ -380,205 +470,246 @@ class DownloadExecutivePDFReportView(APIView):
         else:
             filter_branch_ids = list(accessible_branch_ids)
 
-        queryset = Feedback.objects.filter(
-            organization=user.organization,
-            branch_id__in=filter_branch_ids,
-        )
-
-        days_param = request.query_params.get("days")
-        start_date_str = request.query_params.get("start_date")
-        end_date_str = request.query_params.get("end_date")
-
-        if start_date_str:
-            s_date = parse_date(start_date_str)
-            if s_date:
-                queryset = queryset.filter(created_at__gte=datetime.combine(s_date, time.min))
-        elif days_param:
-            try:
-                days = int(days_param)
-                queryset = queryset.filter(created_at__gte=timezone.now() - timedelta(days=days))
-            except (ValueError, TypeError):
-                queryset = queryset.filter(created_at__gte=timezone.now() - timedelta(days=30))
-        else:
-            queryset = queryset.filter(created_at__gte=timezone.now() - timedelta(days=30))
-
-        if end_date_str:
-            e_date = parse_date(end_date_str)
-            if e_date:
-                queryset = queryset.filter(created_at__lte=datetime.combine(e_date, time.max))
-
-        # Aggregations
-        agg = queryset.aggregate(
-            total_count=Count("id"),
-            avg_rating=Avg("rating"),
-            pos_count=Count(Case(When(sentiment=Feedback.Sentiment.POSITIVE, then=1), output_field=IntegerField())),
-            neu_count=Count(Case(When(sentiment=Feedback.Sentiment.NEUTRAL, then=1), output_field=IntegerField())),
-            neg_count=Count(Case(When(sentiment=Feedback.Sentiment.NEGATIVE, then=1), output_field=IntegerField())),
-        )
-        total = agg["total_count"] or 0
-        avg_rating_val = round(float(agg["avg_rating"] or 0.0), 2)
-        pos = agg["pos_count"] or 0
-        neu = agg["neu_count"] or 0
-        neg = agg["neg_count"] or 0
-
-        # Build PDF with ReportLab
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(
-            buffer,
-            pagesize=letter,
-            leftMargin=36,
-            rightMargin=36,
-            topMargin=36,
-            bottomMargin=36,
-        )
-
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle(
-            "DocTitle",
-            parent=styles["Heading1"],
-            fontSize=18,
-            leading=22,
-            textColor=colors.HexColor("#0f172a"),
-        )
-        subtitle_style = ParagraphStyle(
-            "DocSubtitle",
-            parent=styles["Normal"],
-            fontSize=10,
-            leading=14,
-            textColor=colors.HexColor("#475569"),
-        )
-        header_cell = ParagraphStyle(
-            "HeaderCell",
-            parent=styles["Normal"],
-            fontSize=9,
-            leading=11,
-            fontName="Helvetica-Bold",
-            textColor=colors.white,
-        )
-        body_cell = ParagraphStyle(
-            "BodyCell",
-            parent=styles["Normal"],
-            fontSize=8,
-            leading=11,
-            textColor=colors.HexColor("#1e293b"),
-        )
-        body_cell_bold = ParagraphStyle(
-            "BodyCellBold",
-            parent=body_cell,
-            fontName="Helvetica-Bold",
-        )
-
-        elements = []
-
-        # Title & Subtitle
-        org_name = user.organization.name if user.organization else "Organization"
-        elements.append(Paragraph(f"<b>{org_name} — Executive Feedback Report</b>", title_style))
-        elements.append(Spacer(1, 6))
-
-        branch_label = "All Accessible Branches"
-        if branch_param and len(filter_branch_ids) == 1:
-            selected_branch = accessible_branches_qs.filter(id=filter_branch_ids[0]).first()
-            if selected_branch:
-                branch_label = selected_branch.name
-
-        generated_at = timezone.now().strftime("%Y-%m-%d %H:%M:%S UTC")
-        period_label = f"Generated: {generated_at} | Scope: {branch_label}"
-        elements.append(Paragraph(period_label, subtitle_style))
-        elements.append(Spacer(1, 16))
-
-        # KPI Summary Table
-        summary_data = [
-            [
-                Paragraph("Metric", header_cell),
-                Paragraph("Value", header_cell),
-                Paragraph("Metric", header_cell),
-                Paragraph("Value", header_cell),
-            ],
-            [
-                Paragraph("Total Submissions", body_cell_bold),
-                Paragraph(str(total), body_cell),
-                Paragraph("Average Rating", body_cell_bold),
-                Paragraph(f"{avg_rating_val} / 5.0", body_cell),
-            ],
-            [
-                Paragraph("Positive Feedback", body_cell_bold),
-                Paragraph(f"{pos} ({(pos / total * 100):.1f}%)" if total else "0 (0.0%)", body_cell),
-                Paragraph("Negative Feedback", body_cell_bold),
-                Paragraph(f"{neg} ({(neg / total * 100):.1f}%)" if total else "0 (0.0%)", body_cell),
-            ],
-        ]
-        summary_table = Table(summary_data, colWidths=[130, 140, 130, 140])
-        summary_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2563eb")),
-            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f8fafc"), colors.white]),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(summary_table)
-        elements.append(Spacer(1, 20))
-
-        # Recent Feedback Table
-        elements.append(Paragraph("<b>Recent Feedback Submissions (Up to 25 items)</b>", styles["Heading2"]))
-        elements.append(Spacer(1, 8))
-
-        recent_items = list(queryset.select_related("branch", "category").order_by("-created_at")[:25])
-        if not recent_items:
-            elements.append(Paragraph("No feedback submissions recorded for this period.", subtitle_style))
-        else:
-            feedback_table_data = [
-                [
-                    Paragraph("Date", header_cell),
-                    Paragraph("Branch", header_cell),
-                    Paragraph("Category", header_cell),
-                    Paragraph("Rating", header_cell),
-                    Paragraph("Sentiment", header_cell),
-                    Paragraph("Customer & Comment", header_cell),
-                ]
-            ]
-            for item in recent_items:
-                date_str = item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "-"
-                branch_name = item.branch.name if item.branch else "-"
-                cat_name = item.category.name if item.category else "General"
-                rating_str = f"{item.rating}★"
-                sent_str = item.sentiment.capitalize() if item.sentiment else "Neutral"
-                msg_snip = (item.message or "No message")
-                if len(msg_snip) > 80:
-                    msg_snip = msg_snip[:77] + "..."
-                cust = f"<b>{item.customer_name or 'Anonymous'}</b>: {msg_snip}"
-
-                feedback_table_data.append([
-                    Paragraph(date_str, body_cell),
-                    Paragraph(branch_name, body_cell),
-                    Paragraph(cat_name, body_cell),
-                    Paragraph(rating_str, body_cell_bold),
-                    Paragraph(sent_str, body_cell),
-                    Paragraph(cust, body_cell),
-                ])
-
-            feedback_table = Table(
-                feedback_table_data,
-                colWidths=[70, 80, 80, 45, 55, 210]
+        # Restrict concurrent PDF export requests per user to prevent RAM exhaustion
+        export_lock_key = f"pdf_export_lock:{user.id}"
+        if not cache.add(export_lock_key, "1", timeout=15):
+            return Response(
+                {"error": "A PDF export is already in progress. Please wait a moment."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
-            feedback_table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+
+        try:
+            queryset = Feedback.objects.filter(
+                organization=user.organization,
+                branch_id__in=filter_branch_ids,
+            )
+
+            days_param = request.query_params.get("days")
+            start_date_str = request.query_params.get("start_date")
+            end_date_str = request.query_params.get("end_date")
+
+            if start_date_str:
+                s_date = parse_date(start_date_str)
+                if s_date:
+                    queryset = queryset.filter(
+                        created_at__gte=datetime.combine(s_date, time.min, tzinfo=dt_timezone.utc)
+                    )
+            elif days_param:
+                try:
+                    days = max(1, min(int(days_param), 365))
+                except (ValueError, TypeError):
+                    days = 30
+                queryset = queryset.filter(created_at__gte=timezone.now() - timedelta(days=days))
+            else:
+                queryset = queryset.filter(created_at__gte=timezone.now() - timedelta(days=30))
+
+            if end_date_str:
+                e_date = parse_date(end_date_str)
+                if e_date:
+                    queryset = queryset.filter(
+                        created_at__lte=datetime.combine(e_date, time.max, tzinfo=dt_timezone.utc)
+                    )
+
+            # Aggregations (strictly parameterized Django ORM expressions)
+            agg = queryset.aggregate(
+                total_count=Count("id"),
+                avg_rating=Avg("rating"),
+                pos_count=Count(Case(When(sentiment=Feedback.Sentiment.POSITIVE, then=1), output_field=IntegerField())),
+                neu_count=Count(Case(When(sentiment=Feedback.Sentiment.NEUTRAL, then=1), output_field=IntegerField())),
+                neg_count=Count(Case(When(sentiment=Feedback.Sentiment.NEGATIVE, then=1), output_field=IntegerField())),
+            )
+            total = agg["total_count"] or 0
+            avg_rating_val = round(float(agg["avg_rating"] or 0.0), 2)
+            pos = agg["pos_count"] or 0
+            neu = agg["neu_count"] or 0
+            neg = agg["neg_count"] or 0
+
+            display_tz_name = getattr(settings, "DISPLAY_TIME_ZONE", "Africa/Lagos")
+            try:
+                display_tz = ZoneInfo(display_tz_name)
+            except Exception:
+                display_tz = dt_timezone.utc
+                display_tz_name = "UTC"
+
+            # Build PDF with ReportLab
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(
+                buffer,
+                pagesize=letter,
+                leftMargin=36,
+                rightMargin=36,
+                topMargin=36,
+                bottomMargin=36,
+            )
+
+            styles = getSampleStyleSheet()
+            title_style = ParagraphStyle(
+                "DocTitle",
+                parent=styles["Heading1"],
+                fontSize=18,
+                leading=22,
+                textColor=colors.HexColor("#000000"),
+            )
+            subtitle_style = ParagraphStyle(
+                "DocSubtitle",
+                parent=styles["Normal"],
+                fontSize=10,
+                leading=14,
+                textColor=colors.HexColor("#525252"),
+            )
+            header_cell = ParagraphStyle(
+                "HeaderCell",
+                parent=styles["Normal"],
+                fontSize=9,
+                leading=11,
+                fontName="Helvetica-Bold",
+                textColor=colors.white,
+            )
+            body_cell = ParagraphStyle(
+                "BodyCell",
+                parent=styles["Normal"],
+                fontSize=8,
+                leading=11,
+                textColor=colors.HexColor("#171717"),
+            )
+            body_cell_bold = ParagraphStyle(
+                "BodyCellBold",
+                parent=body_cell,
+                fontName="Helvetica-Bold",
+            )
+
+            elements = []
+
+            # Title & Subtitle (strictly XML-escaped)
+            raw_org_name = user.organization.name if user.organization else "Organization"
+            safe_org_name = xml_escape(str(raw_org_name))
+            elements.append(Paragraph(f"<b>{safe_org_name} — Executive Feedback Report</b>", title_style))
+            elements.append(Spacer(1, 6))
+
+            branch_label = "All Accessible Branches"
+            if branch_param and len(filter_branch_ids) == 1:
+                selected_branch = accessible_branches_qs.filter(id=filter_branch_ids[0]).first()
+                if selected_branch:
+                    branch_label = selected_branch.name
+            safe_branch_label = xml_escape(str(branch_label))
+
+            now_local = timezone.now().astimezone(display_tz)
+            generated_at = now_local.strftime(f"%Y-%m-%d %H:%M:%S {display_tz_name}")
+            period_label = f"Generated: {xml_escape(generated_at)} | Scope: {safe_branch_label}"
+            elements.append(Paragraph(period_label, subtitle_style))
+            elements.append(Spacer(1, 16))
+
+            # KPI Summary Table
+            summary_data = [
+                [
+                    Paragraph("Metric", header_cell),
+                    Paragraph("Value", header_cell),
+                    Paragraph("Metric", header_cell),
+                    Paragraph("Value", header_cell),
+                ],
+                [
+                    Paragraph("Total Submissions", body_cell_bold),
+                    Paragraph(str(total), body_cell),
+                    Paragraph("Average Rating", body_cell_bold),
+                    Paragraph(f"{avg_rating_val} / 5.0", body_cell),
+                ],
+                [
+                    Paragraph("Positive Feedback", body_cell_bold),
+                    Paragraph(f"{pos} ({(pos / total * 100):.1f}%)" if total else "0 (0.0%)", body_cell),
+                    Paragraph("Negative Feedback", body_cell_bold),
+                    Paragraph(f"{neg} ({(neg / total * 100):.1f}%)" if total else "0 (0.0%)", body_cell),
+                ],
+            ]
+            summary_table = Table(summary_data, colWidths=[130, 140, 130, 140])
+            summary_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#000000")),
                 ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f8fafc"), colors.white]),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d4d4d4")),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f5f5f5"), colors.white]),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
             ]))
-            elements.append(feedback_table)
+            elements.append(summary_table)
+            elements.append(Spacer(1, 20))
 
-        doc.build(elements)
-        pdf_data = buffer.getvalue()
-        buffer.close()
+            # Recent Feedback Table (capped strictly to MAX_PDF_EXPORT_ROWS)
+            elements.append(
+                Paragraph(
+                    f"<b>Recent Feedback Submissions (Up to {MAX_PDF_EXPORT_ROWS} items)</b>",
+                    styles["Heading2"],
+                )
+            )
+            elements.append(Spacer(1, 8))
 
-        response = HttpResponse(pdf_data, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="Executive_Feedback_Report_{timezone.now().strftime("%Y%m%d")}.pdf"'
-        return response
+            recent_items = list(
+                queryset.select_related("branch", "category").order_by("-created_at")[:MAX_PDF_EXPORT_ROWS]
+            )
+            if not recent_items:
+                elements.append(Paragraph("No feedback submissions recorded for this period.", subtitle_style))
+            else:
+                feedback_table_data = [
+                    [
+                        Paragraph("Date", header_cell),
+                        Paragraph("Branch", header_cell),
+                        Paragraph("Category", header_cell),
+                        Paragraph("Rating", header_cell),
+                        Paragraph("Sentiment", header_cell),
+                        Paragraph("Customer & Comment", header_cell),
+                    ]
+                ]
+                for item in recent_items:
+                    date_str = (
+                        item.created_at.astimezone(display_tz).strftime("%Y-%m-%d %H:%M")
+                        if item.created_at
+                        else "-"
+                    )
+                    safe_branch = xml_escape(str(item.branch.name if item.branch else "-"))
+                    safe_cat = xml_escape(str(item.category.name if item.category else "General"))
+                    rating_str = f"{item.rating}★"
+                    sent_str = xml_escape(str(item.sentiment.capitalize() if item.sentiment else "Neutral"))
+                    msg_snip = item.message or "No message"
+                    if len(msg_snip) > 80:
+                        msg_snip = msg_snip[:77] + "..."
+                    safe_msg = xml_escape(str(msg_snip))
+                    safe_cust = xml_escape(str(item.customer_name or "Anonymous"))
+                    cust = f"<b>{safe_cust}</b>: {safe_msg}"
+
+                    feedback_table_data.append([
+                        Paragraph(xml_escape(date_str), body_cell),
+                        Paragraph(safe_branch, body_cell),
+                        Paragraph(safe_cat, body_cell),
+                        Paragraph(rating_str, body_cell_bold),
+                        Paragraph(sent_str, body_cell),
+                        Paragraph(cust, body_cell),
+                    ])
+
+                feedback_table = Table(
+                    feedback_table_data,
+                    colWidths=[70, 80, 80, 45, 55, 210]
+                )
+                feedback_table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#171717")),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e5e5")),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#fafafa"), colors.white]),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]))
+                elements.append(feedback_table)
+
+            doc.build(elements)
+            pdf_data = buffer.getvalue()
+            buffer.close()
+
+            response = HttpResponse(pdf_data, content_type="application/pdf")
+            response["Content-Disposition"] = (
+                f'attachment; filename="Executive_Feedback_Report_{now_local.strftime("%Y%m%d")}.pdf"'
+            )
+            response["X-Content-Type-Options"] = "nosniff"
+            return response
+        finally:
+            cache.delete(export_lock_key)

@@ -14,6 +14,7 @@ import os
 import sys
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -21,26 +22,42 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / ".env")
 
-# SECURITY WARNING: keep the secret key used in production secret!
-# Read from environment; the .env.example shows the expected shape.
-SECRET_KEY = os.environ.get(
-    "DJANGO_SECRET_KEY",
-    "django-insecure-CHANGE-ME-in-.env-for-any-real-use",
-)
+IS_TESTING = "test" in sys.argv or any("pytest" in arg for arg in sys.argv)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "True") == "True"
+
+# SECURITY WARNING: keep the secret key used in production secret!
+# Enforce a strong (>=256-bit / 32-char) non-default key when DEBUG=False.
+_ENV_SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "").strip()
+if not DEBUG and not IS_TESTING:
+    if (
+        not _ENV_SECRET_KEY
+        or _ENV_SECRET_KEY.startswith("django-insecure-")
+        or len(_ENV_SECRET_KEY) < 32
+    ):
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set to a strong (>=32 char) secret when DJANGO_DEBUG=False."
+        )
+    SECRET_KEY = _ENV_SECRET_KEY
+else:
+    SECRET_KEY = _ENV_SECRET_KEY or "django-insecure-CHANGE-ME-in-.env-for-any-real-use"
 
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
     if host.strip()
 ]
+if not DEBUG and not IS_TESTING:
+    if not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS:
+        raise ImproperlyConfigured(
+            "DJANGO_ALLOWED_HOSTS must be explicitly locked down (no wildcard '*') in production."
+        )
 if DEBUG and "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("testserver")
 
 # Fast password hasher for test suite execution
-if "test" in sys.argv or any("pytest" in arg for arg in sys.argv):
+if IS_TESTING:
     PASSWORD_HASHERS = [
         "django.contrib.auth.hashers.MD5PasswordHasher",
     ]
@@ -118,8 +135,33 @@ REST_FRAMEWORK = {
         'anon': '100/day',
         'user': '1000/day',
         'public_feedback': '10/minute',
+        'public_feedback_token': '60/minute',
+        'auth_login': '5/minute',
+        'pdf_export': '10/minute',
     },
 }
+
+# Request payload size limits (DoS / memory exhaustion defense)
+DATA_UPLOAD_MAX_MEMORY_SIZE = 262144  # 256 KB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 262144  # 256 KB
+
+# Session, CSRF, and HTTP security header hardening
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_AGE = 60 * 60 * 8  # 8-hour shift session lifetime
+CSRF_COOKIE_SAMESITE = 'Lax'
+X_FRAME_OPTIONS = 'DENY'
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = os.environ.get("DJANGO_SECURE_SSL_REDIRECT", "True") == "True"
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
 
 FRONTEND_SCAN_BASE_URL = os.environ.get(
     "FRONTEND_SCAN_BASE_URL",
@@ -269,6 +311,9 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 
 USE_TZ = True
+
+# Canonical DB storage and indexing are strictly UTC; report exports and UI convert to display TZ.
+DISPLAY_TIME_ZONE = os.environ.get("DISPLAY_TIME_ZONE", "Africa/Lagos")
 
 
 # Static files (CSS, JavaScript, Images)

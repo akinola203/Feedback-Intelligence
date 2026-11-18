@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
@@ -10,6 +11,7 @@ from organizations.models import Branch, Organization, UserBranch
 
 class AuthEndpointsTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = APIClient()
 
         # Tenant Org
@@ -88,8 +90,9 @@ class AuthEndpointsTests(TestCase):
             "password": "ManagerPassword123!",
         }
         response = self.client.post(self.login_url, payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("Organization not found", response.data["error"])
+        # Uniform 401 prevents organization/user enumeration
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.data["error"], "Invalid credentials.")
 
     def test_login_fails_with_wrong_password(self):
         payload = {
@@ -99,7 +102,7 @@ class AuthEndpointsTests(TestCase):
         }
         response = self.client.post(self.login_url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-        self.assertIn("Invalid email or password", response.data["error"])
+        self.assertEqual(response.data["error"], "Invalid credentials.")
 
     def test_login_fails_for_deactivated_user(self):
         payload = {

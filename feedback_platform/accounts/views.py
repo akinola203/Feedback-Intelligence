@@ -2,20 +2,34 @@ from django.contrib.auth import authenticate, login, logout
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from organizations.models import Organization
+from .models import User
 from .serializers import LoginSerializer, UserProfileSerializer
+
+UNIFORM_AUTH_ERROR = {"error": "Invalid credentials."}
+
+
+class LoginRateThrottle(AnonRateThrottle):
+    """Strict rate limiter against credential stuffing and brute-force attacks."""
+    scope = "auth_login"
 
 
 class LoginView(APIView):
     """
     Session login endpoint. Authenticates an organization-scoped user
-    and establishes a secure session cookie.
+    and establishes a hardened session cookie.
+
+    Hardened against user/organization enumeration and timing attacks:
+    all authentication failures return an identical HTTP 401 response
+    after performing password hashing work.
     """
     permission_classes = [AllowAny]
+    throttle_classes = [LoginRateThrottle]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -26,13 +40,11 @@ class LoginView(APIView):
         password = serializer.validated_data["password"]
         slug = serializer.validated_data["organization_slug"].strip().lower()
 
-        try:
-            organization = Organization.objects.get(slug=slug, is_active=True)
-        except Organization.DoesNotExist:
-            return Response(
-                {"error": "Organization not found or inactive."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        organization = Organization.objects.filter(slug=slug, is_active=True).first()
+        if organization is None:
+            # Constant-time defense: perform dummy password hash to match real failure latency
+            User().set_password(password)
+            return Response(UNIFORM_AUTH_ERROR, status=status.HTTP_401_UNAUTHORIZED)
 
         user = authenticate(
             request,
@@ -41,17 +53,8 @@ class LoginView(APIView):
             password=password,
         )
 
-        if not user:
-            return Response(
-                {"error": "Invalid email or password."},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        if not user.is_active:
-            return Response(
-                {"error": "User account is deactivated."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        if not user or not user.is_active:
+            return Response(UNIFORM_AUTH_ERROR, status=status.HTTP_401_UNAUTHORIZED)
 
         login(request, user)
         return Response(UserProfileSerializer(user).data, status=status.HTTP_200_OK)
@@ -59,7 +62,7 @@ class LoginView(APIView):
 
 class LogoutView(APIView):
     """
-    Terminates the current session and clears session cookies.
+    Terminates the current session and flushes session state.
     """
     permission_classes = [AllowAny]
 

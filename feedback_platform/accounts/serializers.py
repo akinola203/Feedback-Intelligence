@@ -5,14 +5,15 @@ from .models import User
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
-    organization_slug = serializers.CharField()
+    password = serializers.CharField(write_only=True, max_length=256)
+    organization_slug = serializers.CharField(max_length=100)
 
 
 class BranchBriefSerializer(serializers.ModelSerializer):
     class Meta:
         model = Branch
         fields = ["id", "name", "is_active"]
+        read_only_fields = ["id", "name", "is_active"]
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -27,6 +28,18 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "full_name",
+            "role",
+            "is_staff",
+            "is_superuser",
+            "organization_id",
+            "organization_name",
+            "organization_slug",
+            "branches",
+        ]
+        # Explicitly lock all privilege & tenant fields against mass assignment
+        read_only_fields = [
+            "id",
+            "email",
             "role",
             "is_staff",
             "is_superuser",

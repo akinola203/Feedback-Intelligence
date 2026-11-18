@@ -146,9 +146,11 @@ class NegativeFeedbackWebSocketBroadcastTests(TestCase):
                     customer_name="Jane Doe",
                 )
 
-            mock_group_send.assert_called_once()
-            group_name, payload = mock_group_send.call_args[0]
-            self.assertEqual(group_name, f"org_{self.org.id}_alerts")
+            self.assertEqual(mock_group_send.call_count, 2)
+            sent_groups = [call.args[0] for call in mock_group_send.call_args_list]
+            self.assertIn(f"org_{self.org.id}_alerts", sent_groups)
+            self.assertIn(f"branch_{self.branch.id}_alerts", sent_groups)
+            _, payload = mock_group_send.call_args_list[0][0]
             self.assertEqual(payload["type"], "negative_feedback_alert")
             content = payload["content"]
             self.assertEqual(content["rating"], 2)
