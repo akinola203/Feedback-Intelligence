@@ -65,9 +65,9 @@ export default function DashboardLayout({
   }[user?.role || "staff"];
 
   const navItems = [
-    { label: "Intelligence", href: "/dashboard" },
-    { label: "Complaints & Notes", href: "/dashboard/complaints" },
-    { label: "Branch QR Stands", href: "/dashboard/qrcodes" },
+    { label: "Overview", href: "/dashboard" },
+    { label: "Complaints", href: "/dashboard/complaints" },
+    { label: "QR Codes", href: "/dashboard/qrcodes" },
   ];
 
   return (

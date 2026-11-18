@@ -6,7 +6,9 @@ from .models import User
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, max_length=256)
-    organization_slug = serializers.CharField(max_length=100)
+    organization_slug = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, default=""
+    )
 
 
 class BranchBriefSerializer(serializers.ModelSerializer):

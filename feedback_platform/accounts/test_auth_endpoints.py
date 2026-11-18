@@ -83,6 +83,33 @@ class AuthEndpointsTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data["branches"]), 2)
 
+    def test_login_without_org_slug_resolves_unique_email_and_rejects_ambiguous(self):
+        # Unique email resolves cleanly without organization_slug
+        resp_unique = self.client.post(
+            self.login_url,
+            {"email": "manager@megamart.com", "password": "ManagerPassword123!"},
+            format="json",
+        )
+        self.assertEqual(resp_unique.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp_unique.data["organization_slug"], "megamart")
+
+        # Create second org with identical email -> omitting slug must fail uniformly with 401
+        org2 = Organization.objects.create(name="OtherMart", slug="othermart", is_active=True)
+        User.objects.create_user(
+            organization=org2,
+            email="manager@megamart.com",
+            password="OtherPassword123!",
+            role=User.Role.MANAGER,
+        )
+        cache.clear()
+        resp_ambiguous = self.client.post(
+            self.login_url,
+            {"email": "manager@megamart.com", "password": "ManagerPassword123!"},
+            format="json",
+        )
+        self.assertEqual(resp_ambiguous.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(resp_ambiguous.data, {"error": "Invalid credentials."})
+
     def test_login_fails_with_invalid_organization_slug(self):
         payload = {
             "organization_slug": "nonexistent-slug",

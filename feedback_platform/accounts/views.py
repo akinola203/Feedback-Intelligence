@@ -38,9 +38,21 @@ class LoginView(APIView):
 
         email = serializer.validated_data["email"]
         password = serializer.validated_data["password"]
-        slug = serializer.validated_data["organization_slug"].strip().lower()
+        slug = (serializer.validated_data.get("organization_slug") or "").strip().lower()
 
-        organization = Organization.objects.filter(slug=slug, is_active=True).first()
+        if slug:
+            organization = Organization.objects.filter(slug=slug, is_active=True).first()
+        else:
+            # Optional slug: resolve only if email uniquely identifies a single active org
+            matching_orgs = list(
+                Organization.objects.filter(
+                    is_active=True,
+                    users__email__iexact=email.strip().lower(),
+                    users__is_active=True,
+                ).distinct()[:2]
+            )
+            organization = matching_orgs[0] if len(matching_orgs) == 1 else None
+
         if organization is None:
             # Constant-time defense: perform dummy password hash to match real failure latency
             User().set_password(password)

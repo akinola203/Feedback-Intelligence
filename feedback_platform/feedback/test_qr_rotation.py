@@ -92,3 +92,29 @@ class RotateQRCodeEndpointTests(TestCase):
         response = self.client.post(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["branch_id"], str(self.branch_a2.id))
+
+    def test_branch_qr_list_requires_authentication(self):
+        url = reverse("branch-qr-code-list")
+        response = self.client.get(url)
+        self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
+
+    def test_branch_qr_list_scoped_to_manager_assigned_branches(self):
+        self.client.force_authenticate(user=self.manager_a1)
+        url = reverse("branch-qr-code-list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        branches = response.data["branches"]
+        self.assertEqual(len(branches), 1)
+        self.assertEqual(branches[0]["branch_id"], str(self.branch_a1.id))
+        self.assertEqual(branches[0]["token"], self.qr_a1.token)
+        self.assertIn(self.qr_a1.token, branches[0]["scan_url"])
+        self.assertIsNotNone(branches[0]["created_at"])
+
+    def test_branch_qr_list_returns_all_org_branches_for_admin_only(self):
+        self.client.force_authenticate(user=self.admin_a)
+        url = reverse("branch-qr-code-list")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        branch_ids = {b["branch_id"] for b in response.data["branches"]}
+        self.assertEqual(branch_ids, {str(self.branch_a1.id), str(self.branch_a2.id)})
+        self.assertNotIn(str(self.branch_b.id), branch_ids)

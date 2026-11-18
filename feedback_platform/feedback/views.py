@@ -9,7 +9,7 @@ import qrcode
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Avg, Case, Count, IntegerField, When
+from django.db.models import Avg, Case, Count, IntegerField, Prefetch, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -178,6 +178,60 @@ class PublicFeedbackSubmitView(APIView):
         cache.set(dedup_resp_key, response_payload, timeout=FEEDBACK_DEDUP_TTL_SECONDS)
 
         return Response(response_payload, status=status.HTTP_201_CREATED)
+
+
+class BranchQRCodeListView(APIView):
+    """
+    Lists all accessible branches for the authenticated user alongside each
+    branch's active QR token, creation timestamp, and customer scan URL.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        if not getattr(user, "organization_id", None):
+            raise PermissionDenied("User does not belong to an organization.")
+
+        org = user.organization
+        is_admin = user.role == User.Role.ADMIN or user.is_staff or user.is_superuser
+
+        branches_qs = Branch.objects.filter(organization=org, is_active=True)
+        if not is_admin:
+            assigned_ids = UserBranch.objects.filter(
+                user=user, branch__organization=org, branch__is_active=True
+            ).values_list("branch_id", flat=True)
+            branches_qs = branches_qs.filter(id__in=assigned_ids)
+
+        branches = branches_qs.prefetch_related(
+            Prefetch(
+                "qr_codes",
+                queryset=QRCode.objects.filter(is_active=True).order_by("-created_at"),
+                to_attr="active_qr_list",
+            )
+        ).order_by("name")
+
+        frontend_base_url = getattr(settings, "FRONTEND_SCAN_BASE_URL", "http://localhost:3000/scan")
+        results = []
+        for branch in branches:
+            active_qr = branch.active_qr_list[0] if branch.active_qr_list else None
+            results.append(
+                {
+                    "branch_id": str(branch.id),
+                    "branch_name": branch.name,
+                    "is_active": branch.is_active,
+                    "qr_id": str(active_qr.id) if active_qr else None,
+                    "token": active_qr.token if active_qr else None,
+                    "scan_url": (
+                        f"{frontend_base_url.rstrip('/')}/{active_qr.token}"
+                        if active_qr
+                        else None
+                    ),
+                    "created_at": active_qr.created_at.isoformat() if active_qr else None,
+                }
+            )
+
+        return Response({"branches": results}, status=status.HTTP_200_OK)
 
 
 class DownloadQRCodeView(APIView):
