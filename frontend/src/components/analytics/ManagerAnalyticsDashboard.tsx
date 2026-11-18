@@ -64,7 +64,7 @@ export default function ManagerAnalyticsDashboard() {
       }
 
       const res = await axios.get<AnalyticsPayload>(
-        `${process.env.NEXT_PUBLIC_API_BASE_URL || ""}/api/analytics/overview/`,
+        `${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"}/api/analytics/overview/`,
         {
           params,
           withCredentials: true,
@@ -84,16 +84,15 @@ export default function ManagerAnalyticsDashboard() {
 
   // Real-Time WebSocket Alerts Setup
   useEffect(() => {
-    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    let wsHost = window.location.host;
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    const wsProtocol = apiBase.startsWith("https:") ? "wss:" : "ws:";
+    let wsHost = "localhost:8000";
 
     try {
-      if (process.env.NEXT_PUBLIC_API_BASE_URL) {
-        const url = new URL(process.env.NEXT_PUBLIC_API_BASE_URL);
-        wsHost = url.host;
-      }
+      const url = new URL(apiBase);
+      wsHost = url.host;
     } catch {
-      // fallback
+      wsHost = window.location.host;
     }
 
     const wsUrl = `${wsProtocol}//${wsHost}/ws/alerts/manager/`;
@@ -181,7 +180,7 @@ export default function ManagerAnalyticsDashboard() {
       if (datePreset !== "all") params.days = datePreset;
 
       const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_BASE_URL || ""}/api/reports/executive-pdf/`,
+        `${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"}/api/reports/executive-pdf/`,
         {
           params,
           responseType: "blob",
