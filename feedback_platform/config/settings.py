@@ -165,10 +165,19 @@ else:
     }
 
 # Channel Layers for Django Channels / WebSockets
+CHANNEL_LAYER_BACKPRESSURE_CONFIG = {
+    "capacity": 500,        # Max messages buffered per channel before raising ChannelFull
+    "expiry": 60,           # Seconds before unconsumed messages expire from Redis
+    "group_expiry": 86400,  # Clean up stale manager group subscriptions (24 hours)
+}
+
 if "test" in sys.argv or any("pytest" in arg for arg in sys.argv):
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels.layers.InMemoryChannelLayer",
+            "CONFIG": {
+                **CHANNEL_LAYER_BACKPRESSURE_CONFIG,
+            },
         }
     }
 elif REDIS_URL:
@@ -177,6 +186,7 @@ elif REDIS_URL:
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
                 "hosts": [REDIS_URL],
+                **CHANNEL_LAYER_BACKPRESSURE_CONFIG,
             },
         },
     }
@@ -186,6 +196,7 @@ elif os.environ.get("REDIS_HOST"):
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
                 "hosts": [(os.environ.get("REDIS_HOST", "127.0.0.1"), int(os.environ.get("REDIS_PORT", 6379)))],
+                **CHANNEL_LAYER_BACKPRESSURE_CONFIG,
             },
         },
     }
@@ -193,6 +204,9 @@ else:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels.layers.InMemoryChannelLayer",
+            "CONFIG": {
+                **CHANNEL_LAYER_BACKPRESSURE_CONFIG,
+            },
         }
     }
 

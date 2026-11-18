@@ -136,14 +136,15 @@ class NegativeFeedbackWebSocketBroadcastTests(TestCase):
         self.assertIsNotNone(channel_layer)
 
         with patch.object(channel_layer, "group_send") as mock_group_send:
-            fb = Feedback.objects.create(
-                organization=self.org,
-                branch=self.branch,
-                category=self.category,
-                rating=2,
-                message="Cold soup and slow service.",
-                customer_name="Jane Doe",
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                fb = Feedback.objects.create(
+                    organization=self.org,
+                    branch=self.branch,
+                    category=self.category,
+                    rating=2,
+                    message="Cold soup and slow service.",
+                    customer_name="Jane Doe",
+                )
 
             mock_group_send.assert_called_once()
             group_name, payload = mock_group_send.call_args[0]
@@ -162,14 +163,15 @@ class NegativeFeedbackWebSocketBroadcastTests(TestCase):
         self.assertIsNotNone(channel_layer)
 
         with patch.object(channel_layer, "group_send") as mock_group_send:
-            Feedback.objects.create(
-                organization=self.org,
-                branch=self.branch,
-                category=self.category,
-                rating=4,
-                message="Very good experience.",
-                customer_name="Happy Customer",
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                Feedback.objects.create(
+                    organization=self.org,
+                    branch=self.branch,
+                    category=self.category,
+                    rating=4,
+                    message="Very good experience.",
+                    customer_name="Happy Customer",
+                )
             mock_group_send.assert_not_called()
 
     def test_neutral_feedback_does_not_broadcast(self):
@@ -177,31 +179,34 @@ class NegativeFeedbackWebSocketBroadcastTests(TestCase):
         self.assertIsNotNone(channel_layer)
 
         with patch.object(channel_layer, "group_send") as mock_group_send:
-            Feedback.objects.create(
-                organization=self.org,
-                branch=self.branch,
-                category=self.category,
-                rating=3,
-                message="Average shopping experience.",
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                Feedback.objects.create(
+                    organization=self.org,
+                    branch=self.branch,
+                    category=self.category,
+                    rating=3,
+                    message="Average shopping experience.",
+                )
             mock_group_send.assert_not_called()
 
     def test_feedback_update_does_not_retrigger_broadcast(self):
         channel_layer = get_channel_layer()
         self.assertIsNotNone(channel_layer)
 
-        fb = Feedback.objects.create(
-            organization=self.org,
-            branch=self.branch,
-            category=self.category,
-            rating=5,
-            message="Top quality.",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            fb = Feedback.objects.create(
+                organization=self.org,
+                branch=self.branch,
+                category=self.category,
+                rating=5,
+                message="Top quality.",
+            )
 
         with patch.object(channel_layer, "group_send") as mock_group_send:
-            fb.rating = 1
-            fb.message = "Actually it broke right away."
-            fb.save()
+            with self.captureOnCommitCallbacks(execute=True):
+                fb.rating = 1
+                fb.message = "Actually it broke right away."
+                fb.save()
             # Since is_new is False on updates, broadcast is NOT fired
             mock_group_send.assert_not_called()
 

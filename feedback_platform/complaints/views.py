@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, status
@@ -87,9 +88,36 @@ class ComplaintDetailView(generics.RetrieveUpdateAPIView):
             branch_id__in=branch_ids,
         )
 
+    def get_object(self):
+        locked = getattr(self, "_locked_complaint", None)
+        if locked is not None:
+            return locked
+        return super().get_object()
+
+    def update(self, request, *args, **kwargs):
+        user = request.user
+        branch_ids = get_accessible_branch_ids(user)
+        complaint_id = self.kwargs.get(self.lookup_field)
+
+        with transaction.atomic():
+            # Acquire pessimistic row-level lock on Complaint before reading/mutating.
+            # Deliberately omits nullable select_related joins so PostgreSQL does not
+            # reject FOR UPDATE on the nullable side of a LEFT OUTER JOIN.
+            locked_complaint = get_object_or_404(
+                Complaint.objects.select_for_update(),
+                id=complaint_id,
+                organization=user.organization,
+                branch_id__in=branch_ids,
+            )
+            self._locked_complaint = locked_complaint
+            try:
+                return super().update(request, *args, **kwargs)
+            finally:
+                self._locked_complaint = None
+
     def perform_update(self, serializer):
         user = self.request.user
-        old_status = self.get_object().status
+        old_status = serializer.instance.status
         instance = serializer.save()
 
         # Handle resolution timestamp
@@ -118,30 +146,31 @@ class ComplaintNoteCreateView(APIView):
         user = request.user
         branch_ids = get_accessible_branch_ids(user)
 
-        complaint = get_object_or_404(
-            Complaint,
-            id=complaint_id,
-            organization=user.organization,
-            branch_id__in=branch_ids,
-        )
-
         body = (request.data.get("body") or "").strip()
         if not body:
             return Response({"error": "Note body is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        note = ComplaintNote.objects.create(
-            complaint=complaint,
-            author=user,
-            body=body,
-        )
+        with transaction.atomic():
+            complaint = get_object_or_404(
+                Complaint.objects.select_for_update(),
+                id=complaint_id,
+                organization=user.organization,
+                branch_id__in=branch_ids,
+            )
 
-        AuditLog.objects.create(
-            organization=user.organization,
-            actor_user=user,
-            entity_type="ComplaintNote",
-            entity_id=note.id,
-            action="COMPLAINT_NOTE_ADDED",
-            metadata={"complaint_id": str(complaint.id)},
-        )
+            note = ComplaintNote.objects.create(
+                complaint=complaint,
+                author=user,
+                body=body,
+            )
+
+            AuditLog.objects.create(
+                organization=user.organization,
+                actor_user=user,
+                entity_type="ComplaintNote",
+                entity_id=note.id,
+                action="COMPLAINT_NOTE_ADDED",
+                metadata={"complaint_id": str(complaint.id)},
+            )
 
         return Response(ComplaintNoteSerializer(note).data, status=status.HTTP_201_CREATED)

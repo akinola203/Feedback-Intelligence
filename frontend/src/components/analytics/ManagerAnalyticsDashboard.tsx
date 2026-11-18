@@ -98,16 +98,29 @@ export default function ManagerAnalyticsDashboard() {
 
     const wsUrl = `${wsProtocol}//${wsHost}/ws/alerts/manager/`;
     let socket: WebSocket | null = null;
-    let reconnectTimeout: NodeJS.Timeout;
+    let reconnectTimeout: ReturnType<typeof setTimeout>;
+    let heartbeatInterval: ReturnType<typeof setInterval>;
 
     const connectWebSocket = () => {
       try {
         socket = new WebSocket(wsUrl);
         wsRef.current = socket;
 
+        socket.onopen = () => {
+          clearInterval(heartbeatInterval);
+          heartbeatInterval = setInterval(() => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: "ping" }));
+            }
+          }, 30000);
+        };
+
         socket.onmessage = (event) => {
           try {
             const payload = JSON.parse(event.data);
+            if (payload.type === "pong") {
+              return;
+            }
             if (payload.rating && payload.rating <= 2) {
               setLiveAlerts((prev) => [
                 {
@@ -128,8 +141,12 @@ export default function ManagerAnalyticsDashboard() {
           }
         };
 
-        socket.onclose = () => {
-          reconnectTimeout = setTimeout(connectWebSocket, 5000);
+        socket.onclose = (event) => {
+          clearInterval(heartbeatInterval);
+          // Do not reconnect if server closed due to unauthenticated (4001) or revoked session (4003)
+          if (event.code !== 4001 && event.code !== 4003) {
+            reconnectTimeout = setTimeout(connectWebSocket, 5000);
+          }
         };
 
         socket.onerror = (err) => {
@@ -145,6 +162,7 @@ export default function ManagerAnalyticsDashboard() {
 
     return () => {
       clearTimeout(reconnectTimeout);
+      clearInterval(heartbeatInterval);
       if (wsRef.current) {
         wsRef.current.close();
       }

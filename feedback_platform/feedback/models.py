@@ -1,11 +1,83 @@
+import asyncio
+import inspect
+import logging
 import secrets
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 
 from core.managers import TenantManager
 from core.models import BaseModel
 from organizations.models import Branch, Organization
+
+logger = logging.getLogger(__name__)
+
+WS_BROADCAST_TIMEOUT_SECONDS = 2.0
+
+
+def _dispatch_negative_feedback_alert(group_name: str, payload: dict) -> None:
+    """
+    Dispatches a negative feedback alert to the Channels group with strict
+    timeout and backpressure exception boundaries so Redis hiccups or
+    ChannelFull conditions never crash or block HTTP feedback submissions.
+    """
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.exceptions import ChannelFull
+        from channels.layers import get_channel_layer
+    except Exception as exc:
+        logger.warning("Channels unavailable for WebSocket broadcast: %s", exc)
+        return
+
+    try:
+        from redis.exceptions import RedisError
+    except ImportError:
+        RedisError = ()  # type: ignore[assignment]
+
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+
+    async def _send_with_timeout():
+        result = channel_layer.group_send(group_name, payload)
+        if inspect.isawaitable(result):
+            await asyncio.wait_for(result, timeout=WS_BROADCAST_TIMEOUT_SECONDS)
+
+    try:
+        async_to_sync(_send_with_timeout)()
+    except ChannelFull as exc:
+        logger.warning(
+            "WebSocket backpressure (ChannelFull) dropping alert for group %s: %s",
+            group_name,
+            exc,
+        )
+    except (TimeoutError, asyncio.TimeoutError) as exc:
+        logger.warning(
+            "WebSocket broadcast timed out after %.1fs for group %s: %s",
+            WS_BROADCAST_TIMEOUT_SECONDS,
+            group_name,
+            exc,
+        )
+    except (ConnectionError, OSError) as exc:
+        logger.warning(
+            "WebSocket broker connection error for group %s: %s",
+            group_name,
+            exc,
+        )
+    except Exception as exc:
+        if RedisError and isinstance(exc, RedisError):
+            logger.warning(
+                "RedisError during WebSocket broadcast for group %s: %s",
+                group_name,
+                exc,
+            )
+        else:
+            logger.warning(
+                "Unexpected error during WebSocket broadcast for group %s: %s",
+                group_name,
+                exc,
+            )
 
 
 class Category(BaseModel):
@@ -100,15 +172,17 @@ class QRCode(BaseModel):
 
     @classmethod
     def rotate_for_branch(cls, branch):
-        """Atomically revokes existing active QR code for branch and issues a new active token."""
-        from django.db import transaction
-        from django.utils import timezone
-
+        """
+        Atomically locks the parent Branch row via SELECT ... FOR UPDATE,
+        revokes any existing active QR codes for the branch, and issues a
+        fresh active token without violating uq_qrcode_one_active_per_branch.
+        """
         with transaction.atomic():
-            cls.objects.filter(branch=branch, is_active=True).update(
+            locked_branch = Branch.objects.select_for_update().get(pk=branch.pk)
+            cls.objects.filter(branch=locked_branch, is_active=True).update(
                 is_active=False, revoked_at=timezone.now()
             )
-            return cls.objects.create(branch=branch, is_active=True)
+            return cls.objects.create(branch=locked_branch, is_active=True)
 
 
 class Feedback(BaseModel):
@@ -220,32 +294,42 @@ class Feedback(BaseModel):
             self.sentiment = Feedback.Sentiment.NEUTRAL
         super().save(*args, **kwargs)
 
-        if is_new and self.rating is not None and self.rating <= 2 and self.organization_id:
-            try:
-                from asgiref.sync import async_to_sync
-                from channels.layers import get_channel_layer
-                channel_layer = get_channel_layer()
-                if channel_layer:
-                    branch_name = self.branch.name if self.branch_id else "Unknown Branch"
-                    category_name = self.category.name if self.category_id else "General"
-                    async_to_sync(channel_layer.group_send)(
-                        f"org_{self.organization_id}_alerts",
-                        {
-                            "type": "negative_feedback_alert",
-                            "content": {
-                                "event": "negative_feedback_alert",
-                                "id": str(self.id),
-                                "branch_id": str(self.branch_id),
-                                "branch_name": branch_name,
-                                "category": category_name,
-                                "rating": self.rating,
-                                "sentiment": self.sentiment,
-                                "message": self.message or "",
-                                "customer_name": self.customer_name or "Anonymous",
-                                "created_at": self.created_at.isoformat() if getattr(self, "created_at", None) else None,
-                            },
-                        },
+        if is_new and self.organization_id:
+            org_id = self.organization_id
+            branch_id = self.branch_id
+
+            # Version-bump analytics cache only after DB commit succeeds
+            from .cache import bump_analytics_cache_version
+            transaction.on_commit(
+                lambda oid=org_id, bid=branch_id: bump_analytics_cache_version(oid, bid)
+            )
+
+            if self.rating is not None and self.rating <= 2:
+                # Extract plain scalars before commit so on_commit does zero ORM/DB I/O
+                branch_name = self.branch.name if self.branch_id else "Unknown Branch"
+                category_name = self.category.name if self.category_id else "General"
+                group_name = f"org_{org_id}_alerts"
+                alert_payload = {
+                    "type": "negative_feedback_alert",
+                    "content": {
+                        "event": "negative_feedback_alert",
+                        "id": str(self.id),
+                        "branch_id": str(branch_id),
+                        "branch_name": branch_name,
+                        "category": category_name,
+                        "rating": self.rating,
+                        "sentiment": self.sentiment,
+                        "message": self.message or "",
+                        "customer_name": self.customer_name or "Anonymous",
+                        "created_at": (
+                            self.created_at.isoformat()
+                            if getattr(self, "created_at", None)
+                            else None
+                        ),
+                    },
+                }
+                transaction.on_commit(
+                    lambda grp=group_name, data=alert_payload: _dispatch_negative_feedback_alert(
+                        grp, data
                     )
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning("Failed to broadcast WebSocket alert: %s", e)
+                )

@@ -1,4 +1,5 @@
 import io
+import time as time_mod
 import qrcode
 from datetime import datetime, time, timedelta
 
@@ -23,6 +24,12 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 
 from accounts.models import User
 from organizations.models import Branch, UserBranch
+from .cache import (
+    ANALYTICS_CACHE_TTL,
+    ANALYTICS_LOCK_TTL,
+    ANALYTICS_STALE_TTL,
+    build_analytics_cache_key,
+)
 from .models import Category, Feedback, QRCode
 from .serializers import PublicFeedbackSubmissionSerializer
 
@@ -178,9 +185,82 @@ class ManagerAnalyticsView(APIView):
     """
     Aggregates feedback metrics, sentiment distributions, and rating statistics
     filtered by the authenticated user's organization and assigned branch(es).
+
+    Protected against cache stampedes via:
+    1. Version-bumped cache keys (invalidated on Feedback transaction commit).
+    2. Single-flight distributed Redis lock (`cache.add(lock_key, "1", timeout=5)`).
+    3. Stale-while-revalidate fallback during concurrent cache refreshes.
     """
 
     permission_classes = [IsAuthenticated]
+
+    def _compute_analytics_payload(
+        self, org, accessible_branch_ids, target_branch_ids, start_date_str, end_date_str
+    ):
+        queryset = Feedback.objects.filter(
+            organization=org,
+            branch_id__in=target_branch_ids,
+        )
+
+        if start_date_str:
+            start_date = parse_date(start_date_str)
+            if start_date:
+                queryset = queryset.filter(created_at__gte=datetime.combine(start_date, time.min))
+        if end_date_str:
+            end_date = parse_date(end_date_str)
+            if end_date:
+                queryset = queryset.filter(created_at__lte=datetime.combine(end_date, time.max))
+
+        agg = queryset.aggregate(
+            total_count=Count("id"),
+            avg_rating=Avg("rating"),
+            positive_count=Count(
+                Case(When(sentiment=Feedback.Sentiment.POSITIVE, then=1), output_field=IntegerField())
+            ),
+            neutral_count=Count(
+                Case(When(sentiment=Feedback.Sentiment.NEUTRAL, then=1), output_field=IntegerField())
+            ),
+            negative_count=Count(
+                Case(When(sentiment=Feedback.Sentiment.NEGATIVE, then=1), output_field=IntegerField())
+            ),
+            star_1=Count(Case(When(rating=1, then=1), output_field=IntegerField())),
+            star_2=Count(Case(When(rating=2, then=1), output_field=IntegerField())),
+            star_3=Count(Case(When(rating=3, then=1), output_field=IntegerField())),
+            star_4=Count(Case(When(rating=4, then=1), output_field=IntegerField())),
+            star_5=Count(Case(When(rating=5, then=1), output_field=IntegerField())),
+        )
+
+        total = agg["total_count"] or 0
+        avg_rating = round(float(agg["avg_rating"] or 0.0), 2)
+
+        def calc_pct(count: int) -> float:
+            return round((count / total) * 100, 1) if total > 0 else 0.0
+
+        branches = (
+            Branch.objects.filter(id__in=accessible_branch_ids, is_active=True)
+            .values("id", "name")
+            .order_by("name")
+        )
+
+        return {
+            "summary": {
+                "total_feedback": total,
+                "average_rating": avg_rating,
+            },
+            "sentiment": {
+                "positive": {"count": agg["positive_count"], "percentage": calc_pct(agg["positive_count"])},
+                "neutral": {"count": agg["neutral_count"], "percentage": calc_pct(agg["neutral_count"])},
+                "negative": {"count": agg["negative_count"], "percentage": calc_pct(agg["negative_count"])},
+            },
+            "rating_distribution": {
+                "5_star": {"count": agg["star_5"], "percentage": calc_pct(agg["star_5"])},
+                "4_star": {"count": agg["star_4"], "percentage": calc_pct(agg["star_4"])},
+                "3_star": {"count": agg["star_3"], "percentage": calc_pct(agg["star_3"])},
+                "2_star": {"count": agg["star_2"], "percentage": calc_pct(agg["star_2"])},
+                "1_star": {"count": agg["star_1"], "percentage": calc_pct(agg["star_1"])},
+            },
+            "branches": list(branches),
+        }
 
     def get(self, request):
         user = request.user
@@ -203,79 +283,59 @@ class ManagerAnalyticsView(APIView):
         else:
             target_branch_ids = accessible_branch_ids
 
-        queryset = Feedback.objects.filter(
-            organization=org,
-            branch_id__in=target_branch_ids,
-        )
-
         start_date_str = request.query_params.get("start_date") or ""
         end_date_str = request.query_params.get("end_date") or ""
 
-        # Redis Cache Layer (60-second TTL to offload repeated queries)
-        branch_ids_key = "_".join(sorted(str(b) for b in target_branch_ids))
-        cache_key = f"analytics_{org.id}_{branch_ids_key}_{start_date_str}_{end_date_str}"
+        # Stampede-proof versioned cache keys
+        cache_key = build_analytics_cache_key(
+            org.id, target_branch_ids, start_date_str, end_date_str
+        )
+        stale_key = f"{cache_key}:stale"
+        lock_key = f"{cache_key}:lock"
+
+        # 1. Fast path: fresh cache hit
         cached_data = cache.get(cache_key)
         if cached_data is not None:
             return Response(cached_data)
 
-        if start_date_str:
-            start_date = parse_date(start_date_str)
-            if start_date:
-                queryset = queryset.filter(created_at__gte=datetime.combine(start_date, time.min))
-        if end_date_str:
-            end_date = parse_date(end_date_str)
-            if end_date:
-                queryset = queryset.filter(created_at__lte=datetime.combine(end_date, time.max))
+        # 2. Single-flight lock acquisition (cache.add is atomic SET NX in Redis)
+        lock_acquired = cache.add(lock_key, "1", timeout=ANALYTICS_LOCK_TTL)
 
-        agg = queryset.aggregate(
-            total_count=Count("id"),
-            avg_rating=Avg("rating"),
-            positive_count=Count(Case(When(sentiment=Feedback.Sentiment.POSITIVE, then=1), output_field=IntegerField())),
-            neutral_count=Count(Case(When(sentiment=Feedback.Sentiment.NEUTRAL, then=1), output_field=IntegerField())),
-            negative_count=Count(Case(When(sentiment=Feedback.Sentiment.NEGATIVE, then=1), output_field=IntegerField())),
-            star_1=Count(Case(When(rating=1, then=1), output_field=IntegerField())),
-            star_2=Count(Case(When(rating=2, then=1), output_field=IntegerField())),
-            star_3=Count(Case(When(rating=3, then=1), output_field=IntegerField())),
-            star_4=Count(Case(When(rating=4, then=1), output_field=IntegerField())),
-            star_5=Count(Case(When(rating=5, then=1), output_field=IntegerField())),
-        )
+        if not lock_acquired:
+            # Stale-while-revalidate: serve recent stale snapshot immediately while leader refreshes
+            stale_data = cache.get(stale_key)
+            if stale_data is not None:
+                return Response(stale_data)
 
-        total = agg["total_count"] or 0
-        avg_rating = round(float(agg["avg_rating"] or 0.0), 2)
+            # Cold-start contention: briefly wait for leader to populate cache
+            for _ in range(5):
+                time_mod.sleep(0.05)
+                cached_data = cache.get(cache_key)
+                if cached_data is not None:
+                    return Response(cached_data)
 
-        def calc_pct(count: int) -> float:
-            return round((count / total) * 100, 1) if total > 0 else 0.0
+            # Fallback if leader failed or timed out without populating
+            response_data = self._compute_analytics_payload(
+                org, accessible_branch_ids, target_branch_ids, start_date_str, end_date_str
+            )
+            cache.set(cache_key, response_data, timeout=ANALYTICS_CACHE_TTL)
+            cache.set(stale_key, response_data, timeout=ANALYTICS_STALE_TTL)
+            return Response(response_data)
 
-        branches = (
-            Branch.objects.filter(id__in=accessible_branch_ids, is_active=True)
-            .values("id", "name")
-            .order_by("name")
-        )
+        try:
+            # Double-check after acquiring lock in case leader just finished
+            cached_data = cache.get(cache_key)
+            if cached_data is not None:
+                return Response(cached_data)
 
-        response_data = {
-            "summary": {
-                "total_feedback": total,
-                "average_rating": avg_rating,
-            },
-            "sentiment": {
-                "positive": {"count": agg["positive_count"], "percentage": calc_pct(agg["positive_count"])},
-                "neutral": {"count": agg["neutral_count"], "percentage": calc_pct(agg["neutral_count"])},
-                "negative": {"count": agg["negative_count"], "percentage": calc_pct(agg["negative_count"])},
-            },
-            "rating_distribution": {
-                "5_star": {"count": agg["star_5"], "percentage": calc_pct(agg["star_5"])},
-                "4_star": {"count": agg["star_4"], "percentage": calc_pct(agg["star_4"])},
-                "3_star": {"count": agg["star_3"], "percentage": calc_pct(agg["star_3"])},
-                "2_star": {"count": agg["star_2"], "percentage": calc_pct(agg["star_2"])},
-                "1_star": {"count": agg["star_1"], "percentage": calc_pct(agg["star_1"])},
-            },
-            "branches": list(branches),
-        }
-
-        # Cache response for 60 seconds
-        cache.set(cache_key, response_data, timeout=60)
-
-        return Response(response_data)
+            response_data = self._compute_analytics_payload(
+                org, accessible_branch_ids, target_branch_ids, start_date_str, end_date_str
+            )
+            cache.set(cache_key, response_data, timeout=ANALYTICS_CACHE_TTL)
+            cache.set(stale_key, response_data, timeout=ANALYTICS_STALE_TTL)
+            return Response(response_data)
+        finally:
+            cache.delete(lock_key)
 
 
 class DownloadExecutivePDFReportView(APIView):
