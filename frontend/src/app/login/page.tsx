@@ -2,7 +2,14 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowRight, Lock, Store } from "lucide-react";
+
 import api from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,7 +19,6 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Prefetch CSRF cookie on mount for clean first-attempt session login
   useEffect(() => {
     api.get("/api/auth/me/").catch(() => {
       // Expected 401 when unauthenticated; sets csrftoken cookie
@@ -52,23 +58,22 @@ export default function LoginPage() {
       <div className="absolute bottom-1/4 -right-32 w-96 h-96 bg-black/[0.04] rounded-full blur-3xl -z-10 pointer-events-none" />
       <div className="absolute top-1/3 right-1/4 w-80 h-80 bg-neutral-400/20 rounded-full blur-3xl -z-10 pointer-events-none" />
 
-      {/* Floating Frosted White Glass Showcase Card */}
-      <div className="max-w-md w-full glass-panel rounded-3xl overflow-hidden shadow-[0_16px_50px_rgba(0,0,0,0.08)] border border-white/90">
+      <Card className="max-w-md w-full overflow-hidden shadow-[0_16px_50px_rgba(0,0,0,0.08)]">
         {/* Smoked Black Glass Brand Header */}
         <div className="glass-smoked p-7 text-white border-b border-white/10 space-y-2">
           <div className="flex items-center space-x-2 text-[10px] font-bold uppercase tracking-widest text-neutral-300">
-            <span className="w-2 h-2 rounded-full bg-white" />
+            <Store className="h-3.5 w-3.5 text-white" />
             <span>Feedback Intelligence</span>
           </div>
           <h1 className="text-2xl font-extrabold tracking-tight text-white">
             Manager Portal
           </h1>
           <p className="text-xs text-neutral-300 font-medium">
-            Sign in to monitor live store ratings, complaints & QR stands
+            Sign in to monitor live store ratings, sector delegations &amp; QR stands
           </p>
         </div>
 
-        <div className="p-7 sm:p-8 space-y-6">
+        <CardContent className="p-7 sm:p-8 space-y-6">
           {errorMessage && (
             <div className="p-3.5 bg-black/[0.05] border border-black/20 rounded-2xl text-xs font-semibold text-black">
               {errorMessage}
@@ -77,60 +82,59 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-black uppercase tracking-wider">
-                Organization Slug <span className="text-neutral-400 font-normal normal-case">(optional if email is unique)</span>
-              </label>
-              <input
+              <Label htmlFor="orgSlug">
+                Organization Slug{" "}
+                <span className="text-neutral-400 font-normal normal-case">
+                  (optional if email is unique)
+                </span>
+              </Label>
+              <Input
+                id="orgSlug"
                 type="text"
                 value={orgSlug}
                 onChange={(e) => setOrgSlug(e.target.value)}
                 placeholder="e.g. freshmart"
-                className="w-full glass-input rounded-2xl px-4 py-3 text-xs placeholder-neutral-400 font-medium"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-black uppercase tracking-wider">
-                Work Email
-              </label>
-              <input
+              <Label htmlFor="email">Work Email</Label>
+              <Input
+                id="email"
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="admin@freshmart.ng"
-                className="w-full glass-input rounded-2xl px-4 py-3 text-xs placeholder-neutral-400 font-medium"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-black uppercase tracking-wider">
-                Password
-              </label>
-              <input
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"
-                className="w-full glass-input rounded-2xl px-4 py-3 text-xs placeholder-neutral-400 font-medium"
               />
             </div>
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full py-3.5 bg-black hover:bg-neutral-800 disabled:bg-neutral-300 text-white rounded-2xl text-xs font-bold shadow-xl hover:-translate-y-0.5 active:scale-[0.99] transition duration-200 mt-2"
-            >
-              {isLoading ? "Signing in..." : "Sign In to Console"}
-            </button>
+            <Button type="submit" disabled={isLoading} size="lg" className="w-full mt-2">
+              <span>{isLoading ? "Signing in..." : "Sign In to Console"}</span>
+              {!isLoading && <ArrowRight className="h-3.5 w-3.5" />}
+            </Button>
           </form>
 
-          <div className="pt-3 text-center text-[10px] text-neutral-400 uppercase tracking-widest border-t border-black/[0.06]">
-            Multi-Tenant Secure Session Authority
+          <Separator />
+
+          <div className="flex items-center justify-center gap-1.5 text-[10px] text-neutral-400 uppercase tracking-widest">
+            <Lock className="h-3 w-3" />
+            <span>Multi-Tenant Secure Session Authority</span>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

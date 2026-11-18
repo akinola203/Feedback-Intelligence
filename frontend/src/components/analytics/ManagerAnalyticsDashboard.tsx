@@ -1,7 +1,34 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import axios from "axios";
+import {
+  AlertCircle,
+  ArrowUpRight,
+  Download,
+  RefreshCw,
+  Star,
+  X,
+} from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 
 interface BranchOption {
   id: string;
@@ -48,7 +75,7 @@ interface TaskDelegatedAlert {
 
 export default function ManagerAnalyticsDashboard() {
   const [data, setData] = useState<AnalyticsPayload | null>(null);
-  const [selectedBranch, setSelectedBranch] = useState<string>("");
+  const [selectedBranch, setSelectedBranch] = useState<string>("ALL");
   const [datePreset, setDatePreset] = useState<string>("30");
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,13 +86,15 @@ export default function ManagerAnalyticsDashboard() {
   const [isExportingPDF, setIsExportingPDF] = useState<boolean>(false);
   const wsRef = useRef<WebSocket | null>(null);
 
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+
   const fetchAnalytics = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
       const params: Record<string, string> = {};
-      if (selectedBranch) params.branch_id = selectedBranch;
+      if (selectedBranch && selectedBranch !== "ALL") params.branch_id = selectedBranch;
 
       const now = new Date();
       if (datePreset !== "all") {
@@ -76,28 +105,24 @@ export default function ManagerAnalyticsDashboard() {
         params.end_date = now.toISOString().split("T")[0];
       }
 
-      const res = await axios.get<AnalyticsPayload>(
-        `${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"}/api/analytics/overview/`,
-        {
-          params,
-          withCredentials: true,
-        }
-      );
+      const res = await axios.get<AnalyticsPayload>(`${apiBase}/api/analytics/overview/`, {
+        params,
+        withCredentials: true,
+      });
       setData(res.data);
     } catch {
       setError("Failed to load analytics metrics. Please ensure you are logged in.");
     } finally {
       setIsLoading(false);
     }
-  }, [selectedBranch, datePreset]);
+  }, [selectedBranch, datePreset, apiBase]);
 
   useEffect(() => {
     fetchAnalytics();
   }, [fetchAnalytics]);
 
-  // Real-Time WebSocket Alerts Setup
+  // Real-Time WebSocket Alerts Setup (30s heartbeat + 4001/4003 zombie close handling)
   useEffect(() => {
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
     const wsProtocol = apiBase.startsWith("https:") ? "wss:" : "ws:";
     let wsHost = "localhost:8000";
 
@@ -172,7 +197,6 @@ export default function ManagerAnalyticsDashboard() {
 
         socket.onclose = (event) => {
           clearInterval(heartbeatInterval);
-          // Do not reconnect if server closed due to unauthenticated (4001) or revoked session (4003)
           if (event.code !== 4001 && event.code !== 4003) {
             reconnectTimeout = setTimeout(connectWebSocket, 5000);
           }
@@ -196,7 +220,7 @@ export default function ManagerAnalyticsDashboard() {
         wsRef.current.close();
       }
     };
-  }, [fetchAnalytics]);
+  }, [fetchAnalytics, apiBase]);
 
   const dismissAlert = (id: string) => {
     setLiveAlerts((prev) => prev.filter((alert) => alert.id !== id));
@@ -210,17 +234,14 @@ export default function ManagerAnalyticsDashboard() {
     setIsExportingPDF(true);
     try {
       const params: Record<string, string> = {};
-      if (selectedBranch) params.branch_id = selectedBranch;
+      if (selectedBranch && selectedBranch !== "ALL") params.branch_id = selectedBranch;
       if (datePreset !== "all") params.days = datePreset;
 
-      const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"}/api/reports/executive-pdf/`,
-        {
-          params,
-          responseType: "blob",
-          withCredentials: true,
-        }
-      );
+      const response = await axios.get(`${apiBase}/api/reports/executive-pdf/`, {
+        params,
+        responseType: "blob",
+        withCredentials: true,
+      });
 
       const blob = new Blob([response.data], { type: "application/pdf" });
       const downloadUrl = window.URL.createObjectURL(blob);
@@ -241,12 +262,12 @@ export default function ManagerAnalyticsDashboard() {
 
   if (isLoading && !data) {
     return (
-      <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
+      <div className="space-y-6">
         <div className="h-9 w-64 bg-black/[0.04] rounded-2xl animate-pulse" />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="h-36 glass-panel rounded-3xl animate-pulse" />
-          <div className="h-36 glass-panel rounded-3xl animate-pulse" />
-          <div className="h-36 glass-panel rounded-3xl animate-pulse" />
+          <Card className="h-36 animate-pulse" />
+          <Card className="h-36 animate-pulse" />
+          <Card className="h-36 animate-pulse" />
         </div>
       </div>
     );
@@ -254,18 +275,16 @@ export default function ManagerAnalyticsDashboard() {
 
   if (error || !data) {
     return (
-      <div className="p-8 max-w-md mx-auto text-center glass-panel rounded-3xl space-y-4">
-        <div className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center mx-auto text-base font-bold">
-          !
+      <Card className="p-8 max-w-md mx-auto text-center space-y-4">
+        <div className="w-10 h-10 bg-black text-white rounded-2xl flex items-center justify-center mx-auto">
+          <AlertCircle className="h-5 w-5" />
         </div>
         <p className="text-xs text-neutral-600 font-medium">{error}</p>
-        <button
-          onClick={fetchAnalytics}
-          className="px-5 py-2.5 bg-black hover:bg-neutral-800 text-white rounded-2xl text-xs font-semibold shadow transition"
-        >
-          Retry Connection
-        </button>
-      </div>
+        <Button onClick={fetchAnalytics} size="sm">
+          <RefreshCw className="h-3.5 w-3.5" />
+          <span>Retry Connection</span>
+        </Button>
+      </Card>
     );
   }
 
@@ -277,7 +296,7 @@ export default function ManagerAnalyticsDashboard() {
           {delegationAlerts.map((alert) => (
             <div
               key={alert.id}
-              className="glass-smoked p-5 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-white/20 text-white shadow-2xl transition-all"
+              className="glass-smoked p-5 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-white shadow-2xl transition-all"
             >
               <div className="flex items-start space-x-3.5">
                 <div className="relative mt-1">
@@ -286,9 +305,7 @@ export default function ManagerAnalyticsDashboard() {
                 </div>
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="bg-white text-black font-extrabold text-[10px] uppercase tracking-wider px-2 py-0.5 rounded">
-                      Task Delegated • {alert.priority}
-                    </span>
+                    <Badge variant="inverted">Task Delegated • {alert.priority}</Badge>
                     <span className="text-xs font-bold text-white">{alert.branch_name}</span>
                     <span className="text-xs text-neutral-400">• {alert.sector_label}</span>
                   </div>
@@ -297,24 +314,26 @@ export default function ManagerAnalyticsDashboard() {
                     {alert.delegated_by_name}
                   </p>
                   {alert.note && (
-                    <p className="text-[11px] text-neutral-300 italic">"{alert.note}"</p>
+                    <p className="text-[11px] text-neutral-300 italic">&ldquo;{alert.note}&rdquo;</p>
                   )}
                 </div>
               </div>
 
-              <div className="self-end sm:self-center flex items-center space-x-2">
-                <a
-                  href="/dashboard/complaints"
-                  className="text-xs font-bold bg-white text-black px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition"
-                >
-                  Open Queue
-                </a>
-                <button
+              <div className="self-end sm:self-center flex items-center gap-2">
+                <Button asChild variant="inverted" size="sm">
+                  <Link href="/dashboard/complaints">
+                    <span>Open Queue</span>
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  </Link>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => dismissDelegationAlert(alert.id)}
-                  className="text-xs font-semibold text-neutral-400 hover:text-white px-3 py-1.5 rounded-xl border border-white/10 hover:border-white/30 transition"
+                  className="text-neutral-400 hover:text-white hover:bg-white/10"
                 >
-                  Dismiss
-                </button>
+                  <X className="h-4 w-4" />
+                </Button>
               </div>
             </div>
           ))}
@@ -327,7 +346,7 @@ export default function ManagerAnalyticsDashboard() {
           {liveAlerts.map((alert) => (
             <div
               key={alert.id}
-              className="glass-smoked p-5 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-white/20 text-white shadow-2xl transition-all"
+              className="glass-smoked p-5 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-white shadow-2xl transition-all"
             >
               <div className="flex items-start space-x-3.5">
                 <div className="relative mt-1">
@@ -335,15 +354,13 @@ export default function ManagerAnalyticsDashboard() {
                   <span className="w-2.5 h-2.5 rounded-full bg-white block relative" />
                 </div>
                 <div className="space-y-1">
-                  <div className="flex items-center space-x-2">
-                    <span className="bg-white text-black font-extrabold text-[10px] uppercase tracking-wider px-2 py-0.5 rounded">
-                      Critical Alert ({alert.rating}★)
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="inverted">Critical Alert ({alert.rating}★)</Badge>
                     <span className="text-xs font-bold text-white">{alert.branch_name}</span>
                     <span className="text-xs text-neutral-400">• {alert.category}</span>
                   </div>
                   <p className="text-xs font-medium text-neutral-200 italic">
-                    "{alert.message}"
+                    &ldquo;{alert.message}&rdquo;
                   </p>
                   <p className="text-[10px] text-neutral-400">
                     Customer: {alert.customer_name} • Received via Live Stand QR
@@ -351,148 +368,162 @@ export default function ManagerAnalyticsDashboard() {
                 </div>
               </div>
 
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => dismissAlert(alert.id)}
-                className="self-end sm:self-center text-xs font-semibold text-neutral-400 hover:text-white px-3 py-1.5 rounded-xl border border-white/10 hover:border-white/30 transition"
+                className="self-end sm:self-center text-neutral-400 hover:text-white hover:bg-white/10"
               >
-                Dismiss
-              </button>
+                <X className="h-4 w-4" />
+              </Button>
             </div>
           ))}
         </div>
       )}
 
-      {/* Header and Filter Controls */}
+      {/* Header and shadcn Controls */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight text-black">
             Store Intelligence
           </h1>
           <p className="text-xs text-neutral-500 font-medium mt-0.5">
-            Real-time customer feedback metrics & sentiment aggregation
+            Real-time customer feedback metrics &amp; sentiment aggregation
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Branch Filter Glass Well */}
-          <div className="glass-well p-1 rounded-2xl flex items-center">
-            <select
-              value={selectedBranch}
-              onChange={(e) => setSelectedBranch(e.target.value)}
-              className="bg-transparent border-none text-xs font-semibold text-black px-3 py-1.5 focus:outline-none cursor-pointer"
-            >
-              <option value="">All Store Locations</option>
-              {data.branches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+          <div className="w-48">
+            <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+              <SelectTrigger>
+                <SelectValue placeholder="All Store Locations" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All Store Locations</SelectItem>
+                {data.branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Date Filter Glass Well */}
-          <div className="glass-well p-1 rounded-2xl flex items-center">
-            <select
-              value={datePreset}
-              onChange={(e) => setDatePreset(e.target.value)}
-              className="bg-transparent border-none text-xs font-semibold text-black px-3 py-1.5 focus:outline-none cursor-pointer"
-            >
-              <option value="7">Last 7 Days</option>
-              <option value="30">Last 30 Days</option>
-              <option value="90">Last 90 Days</option>
-              <option value="all">All Time History</option>
-            </select>
+          <div className="w-40">
+            <Select value={datePreset} onValueChange={setDatePreset}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7">Last 7 Days</SelectItem>
+                <SelectItem value="30">Last 30 Days</SelectItem>
+                <SelectItem value="90">Last 90 Days</SelectItem>
+                <SelectItem value="all">All Time History</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Smoked Black Glass PDF Export Button */}
-          <button
-            onClick={handleExportPDF}
-            disabled={isExportingPDF}
-            className="flex items-center space-x-2 bg-black hover:bg-neutral-800 disabled:bg-neutral-300 text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-xl hover:-translate-y-0.5 active:scale-[0.99] transition duration-200"
-          >
-            <span>↓</span>
+          <Button onClick={handleExportPDF} disabled={isExportingPDF}>
+            <Download className="h-3.5 w-3.5" />
             <span>{isExportingPDF ? "Generating PDF..." : "Export Executive PDF"}</span>
-          </button>
+          </Button>
         </div>
       </div>
 
-      {/* Bento Grid Analytics Showcase */}
+      {/* Bento Grid Tier 1: Hero KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Bento Card 1: Volume */}
-        <div className="glass-panel p-7 rounded-3xl space-y-4 hover:shadow-lg transition">
-          <div className="flex justify-between items-center text-neutral-400 text-xs font-bold uppercase tracking-wider">
-            <span>Feedback Volume</span>
-            <span className="text-black font-mono">01</span>
-          </div>
-          <div>
-            <div className="text-4xl font-extrabold tracking-tight text-black">
-              {data.summary.total_feedback.toLocaleString()}
+        <Card className="hover:shadow-lg transition">
+          <CardHeader className="pb-2">
+            <div className="flex justify-between items-center text-neutral-400 text-[10px] font-bold uppercase tracking-wider">
+              <span>Feedback Volume</span>
+              <span className="text-black font-mono">01</span>
             </div>
-            <p className="text-xs text-neutral-500 font-medium mt-1">Verified customer submissions</p>
-          </div>
-          <div className="pt-2 border-t border-black/[0.06] flex items-center space-x-2 text-[11px] text-neutral-600 font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-black" />
-            <span>Aggregated across active branch QR stands</span>
-          </div>
-        </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <div className="text-4xl font-extrabold tracking-tight text-black">
+                {data.summary.total_feedback.toLocaleString()}
+              </div>
+              <p className="text-xs text-neutral-500 font-medium mt-1">
+                Verified customer submissions
+              </p>
+            </div>
+            <Separator />
+            <div className="flex items-center space-x-2 text-[11px] text-neutral-600 font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-black" />
+              <span>Aggregated across active branch QR stands</span>
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* Bento Card 2: Rating */}
-        <div className="glass-panel p-7 rounded-3xl space-y-4 hover:shadow-lg transition">
-          <div className="flex justify-between items-center text-neutral-400 text-xs font-bold uppercase tracking-wider">
-            <span>Average Rating</span>
-            <span className="text-black font-mono">02</span>
-          </div>
-          <div>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-4xl font-extrabold tracking-tight text-black">
-                {data.summary.average_rating.toFixed(2)}
-              </span>
-              <span className="text-lg text-black font-bold">★</span>
-              <span className="text-xs text-neutral-400 font-mono">/ 5.0</span>
+        <Card className="hover:shadow-lg transition">
+          <CardHeader className="pb-2">
+            <div className="flex justify-between items-center text-neutral-400 text-[10px] font-bold uppercase tracking-wider">
+              <span>Average Rating</span>
+              <span className="text-black font-mono">02</span>
             </div>
-            <p className="text-xs text-neutral-500 font-medium mt-1">Overall customer satisfaction index</p>
-          </div>
-          <div className="pt-2 border-t border-black/[0.06] flex items-center space-x-2 text-[11px] text-neutral-600 font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-black" />
-            <span>Reflects service, pricing, and product freshness</span>
-          </div>
-        </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <div className="flex items-baseline space-x-2">
+                <span className="text-4xl font-extrabold tracking-tight text-black">
+                  {data.summary.average_rating.toFixed(2)}
+                </span>
+                <Star className="h-5 w-5 fill-black text-black self-center" />
+                <span className="text-xs text-neutral-400 font-mono">/ 5.0</span>
+              </div>
+              <p className="text-xs text-neutral-500 font-medium mt-1">
+                Overall customer satisfaction index
+              </p>
+            </div>
+            <Separator />
+            <div className="flex items-center space-x-2 text-[11px] text-neutral-600 font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-black" />
+              <span>Reflects service, pricing, and product freshness</span>
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* Bento Card 3: Satisfaction */}
-        <div className="glass-panel p-7 rounded-3xl space-y-4 hover:shadow-lg transition">
-          <div className="flex justify-between items-center text-neutral-400 text-xs font-bold uppercase tracking-wider">
-            <span>Satisfaction Rate</span>
-            <span className="text-black font-mono">03</span>
-          </div>
-          <div>
-            <div className="text-4xl font-extrabold tracking-tight text-black">
-              {data.sentiment.positive.percentage}%
+        <Card className="hover:shadow-lg transition">
+          <CardHeader className="pb-2">
+            <div className="flex justify-between items-center text-neutral-400 text-[10px] font-bold uppercase tracking-wider">
+              <span>Satisfaction Rate</span>
+              <span className="text-black font-mono">03</span>
             </div>
-            <p className="text-xs text-neutral-500 font-medium mt-1">Share of positive reviews (4–5★)</p>
-          </div>
-          <div className="pt-2 border-t border-black/[0.06] flex items-center space-x-2 text-[11px] text-neutral-600 font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-black" />
-            <span>Target benchmark: 85.0% or above</span>
-          </div>
-        </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <div className="text-4xl font-extrabold tracking-tight text-black">
+                {data.sentiment.positive.percentage}%
+              </div>
+              <p className="text-xs text-neutral-500 font-medium mt-1">
+                Share of positive reviews (4–5★)
+              </p>
+            </div>
+            <Separator />
+            <div className="flex items-center space-x-2 text-[11px] text-neutral-600 font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-black" />
+              <span>Target benchmark: 85.0% or above</span>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Bento Grid Tier 2: Sentiment Breakdown & Rating Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Sentiment Breakdown Card */}
-        <div className="glass-panel p-7 sm:p-8 rounded-3xl space-y-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h2 className="text-base font-extrabold tracking-tight text-black">
-                Sentiment Distribution
-              </h2>
-              <p className="text-xs text-neutral-500">Categorized by customer star rating thresholds</p>
+        <Card>
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <div>
+                <CardTitle>Sentiment Distribution</CardTitle>
+                <CardDescription className="mt-1">
+                  Categorized by customer star rating thresholds
+                </CardDescription>
+              </div>
+              <span className="text-xs font-mono font-bold text-neutral-400">04</span>
             </div>
-            <span className="text-xs font-mono font-bold text-neutral-400">04</span>
-          </div>
-
-          <div className="space-y-4">
-            {/* Positive */}
+          </CardHeader>
+          <CardContent className="space-y-4">
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs font-bold">
                 <span className="text-black">Positive Experience (4–5★)</span>
@@ -508,7 +539,6 @@ export default function ManagerAnalyticsDashboard() {
               </div>
             </div>
 
-            {/* Neutral */}
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs font-bold">
                 <span className="text-neutral-700">Neutral Experience (3★)</span>
@@ -524,7 +554,6 @@ export default function ManagerAnalyticsDashboard() {
               </div>
             </div>
 
-            {/* Negative (High contrast striped dark charcoal) */}
             <div className="space-y-1.5">
               <div className="flex justify-between text-xs font-bold">
                 <span className="text-neutral-900">Negative Grievances (1–2★)</span>
@@ -539,35 +568,35 @@ export default function ManagerAnalyticsDashboard() {
                 />
               </div>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
-        {/* Rating Distribution Card */}
-        <div className="glass-panel p-7 sm:p-8 rounded-3xl space-y-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h2 className="text-base font-extrabold tracking-tight text-black">
-                Rating Spread
-              </h2>
-              <p className="text-xs text-neutral-500">Granular 1 to 5 star frequency breakdown</p>
+        <Card>
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <div>
+                <CardTitle>Rating Spread</CardTitle>
+                <CardDescription className="mt-1">
+                  Granular 1 to 5 star frequency breakdown
+                </CardDescription>
+              </div>
+              <span className="text-xs font-mono font-bold text-neutral-400">05</span>
             </div>
-            <span className="text-xs font-mono font-bold text-neutral-400">05</span>
-          </div>
-
-          <div className="space-y-3.5">
+          </CardHeader>
+          <CardContent className="space-y-3.5">
             {[
               { key: "5_star", stars: 5, color: "bg-black" },
               { key: "4_star", stars: 4, color: "bg-neutral-800" },
-              { key: "3_star", stars: 3, color: "bg-neutral-600" },
-              { key: "2_star", stars: 2, color: "bg-neutral-400" },
+              { key: "3_star", stars: 3, color: "bg-neutral-500" },
+              { key: "2_star", stars: 2, color: "bg-neutral-700" },
               { key: "1_star", stars: 1, color: "bg-neutral-900 striped-bar-negative" },
             ].map(({ key, stars, color }) => {
               const dist = data.rating_distribution[key] || { count: 0, percentage: 0 };
               return (
                 <div key={key} className="flex items-center space-x-3 text-xs">
-                  <div className="w-14 font-bold text-black flex items-center space-x-1">
+                  <div className="w-12 font-bold text-black flex items-center gap-1">
                     <span>{stars}</span>
-                    <span className="text-neutral-400">★</span>
+                    <Star className="h-3 w-3 fill-neutral-400 text-neutral-400" />
                   </div>
                   <div className="flex-1 bg-black/[0.05] rounded-full h-2 overflow-hidden">
                     <div
@@ -582,8 +611,8 @@ export default function ManagerAnalyticsDashboard() {
                 </div>
               );
             })}
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

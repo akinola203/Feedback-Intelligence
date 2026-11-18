@@ -3,6 +3,21 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import axios, { AxiosError } from "axios";
+import { AlertCircle, Check, Lock, Send, Star } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 
 interface Category {
   id: string;
@@ -150,18 +165,18 @@ export default function CustomerScanFeedbackPage() {
 
       {/* Loading State */}
       {isLoadingMetadata && (
-        <div className="glass-panel max-w-md w-full p-10 text-center rounded-3xl space-y-4">
+        <Card className="max-w-md w-full p-10 text-center space-y-4">
           <div className="w-10 h-10 border-2 border-black border-t-transparent rounded-full animate-spin mx-auto" />
           <h2 className="text-base font-bold tracking-tight text-black">Verifying Location</h2>
           <p className="text-xs text-neutral-500">Connecting securely to verified store register...</p>
-        </div>
+        </Card>
       )}
 
       {/* Error State */}
       {!isLoadingMetadata && (metadataError || !metadata) && (
-        <div className="glass-panel max-w-md w-full p-8 text-center rounded-3xl space-y-4 border border-white/80">
-          <div className="w-12 h-12 bg-black text-white rounded-2xl flex items-center justify-center mx-auto text-xl font-bold shadow-md">
-            !
+        <Card className="max-w-md w-full p-8 text-center space-y-4">
+          <div className="w-12 h-12 bg-black text-white rounded-2xl flex items-center justify-center mx-auto shadow-md">
+            <AlertCircle className="h-6 w-6" />
           </div>
           <h1 className="text-xl font-extrabold tracking-tight text-black">
             {isRateLimited ? "Rate Limit Exceeded" : "Store Verification Failed"}
@@ -169,39 +184,38 @@ export default function CustomerScanFeedbackPage() {
           <p className="text-xs text-neutral-600 leading-relaxed max-w-xs mx-auto">
             {metadataError}
           </p>
-          <button
-            onClick={() => fetchStoreMetadata()}
-            className="w-full py-3 bg-black hover:bg-neutral-800 text-white font-semibold rounded-2xl text-xs transition duration-200 active:scale-[0.99] shadow-md"
-          >
+          <Button onClick={() => fetchStoreMetadata()} className="w-full">
             Retry Connection
-          </button>
-        </div>
+          </Button>
+        </Card>
       )}
 
       {/* Thank You State */}
       {!isLoadingMetadata && isSubmitted && metadata && (
-        <div className="glass-panel max-w-md w-full p-8 text-center rounded-3xl space-y-5 border border-white/90">
-          <div className="w-16 h-16 bg-black text-white rounded-2xl flex items-center justify-center mx-auto text-2xl font-black shadow-lg">
-            ✓
+        <Card className="max-w-md w-full p-8 text-center space-y-5">
+          <div className="w-16 h-16 bg-black text-white rounded-2xl flex items-center justify-center mx-auto shadow-lg">
+            <Check className="h-8 w-8" />
           </div>
           <div className="space-y-1">
             <h1 className="text-2xl font-extrabold tracking-tight text-black">Thank You</h1>
             <p className="text-xs text-neutral-500">Your direct voice helps elevate store standards</p>
           </div>
           <div className="glass-well p-4 rounded-2xl space-y-1 text-left">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">Recorded For</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
+              Recorded For
+            </p>
             <p className="text-sm font-bold text-black">{metadata.organization_name}</p>
             <p className="text-xs text-neutral-600">{metadata.branch_name} Branch</p>
           </div>
           <p className="text-xs text-neutral-500">
-            Store leadership and floor supervisors review incoming feedback in real time.
+            Store leadership and department sector leads review incoming feedback in real time.
           </p>
-        </div>
+        </Card>
       )}
 
       {/* Main Feedback Form */}
       {!isLoadingMetadata && !metadataError && !isSubmitted && metadata && (
-        <div className="w-full max-w-lg glass-panel rounded-3xl overflow-hidden shadow-[0_12px_48px_rgba(0,0,0,0.08)] border border-white/90 transition-all">
+        <Card className="w-full max-w-lg overflow-hidden shadow-[0_12px_48px_rgba(0,0,0,0.08)]">
           {/* Smoked Black Glass Header Banner */}
           <div className="glass-smoked p-6 sm:p-7 border-b border-white/10 text-white space-y-1.5">
             <div className="flex items-center space-x-2 text-[10px] uppercase font-bold tracking-widest text-neutral-300">
@@ -216,146 +230,157 @@ export default function CustomerScanFeedbackPage() {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="p-6 sm:p-7 space-y-6">
-            {submitError && (
-              <div className="p-3.5 bg-black/[0.04] border border-black/20 rounded-2xl text-xs font-semibold text-black">
-                {submitError}
-              </div>
-            )}
-
-            {/* Star Rating Bar */}
-            <div className="space-y-2">
-              <label className="block text-xs font-bold uppercase tracking-wider text-black">
-                Overall Experience <span className="text-neutral-400">*</span>
-              </label>
-
-              <div className="glass-well p-3 rounded-2xl flex justify-between items-center px-4">
-                {[1, 2, 3, 4, 5].map((star) => {
-                  const isSelected = formData.rating >= star;
-                  return (
-                    <button
-                      key={star}
-                      type="button"
-                      onClick={() => setFormData((prev) => ({ ...prev, rating: star }))}
-                      className="group p-2 transition-all duration-150 transform hover:-translate-y-0.5 active:scale-95"
-                      aria-label={`${star} Stars`}
-                    >
-                      <span
-                        className={`text-2xl sm:text-3xl transition-all ${
-                          isSelected
-                            ? "text-black drop-shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
-                            : "text-neutral-300 group-hover:text-neutral-400"
-                        }`}
-                      >
-                        ★
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {formData.rating > 0 && (
-                <div className="flex items-center justify-between px-1 text-xs">
-                  <span className="font-bold text-black">
-                    {RATING_DESCRIPTIONS[formData.rating].label}
-                  </span>
-                  <span className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">
-                    {RATING_DESCRIPTIONS[formData.rating].tag} ({formData.rating}/5)
-                  </span>
+          <CardContent className="p-6 sm:p-7">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {submitError && (
+                <div className="p-3.5 bg-black/[0.04] border border-black/20 rounded-2xl text-xs font-semibold text-black">
+                  {submitError}
                 </div>
               )}
-            </div>
 
-            {/* Category Dropdown */}
-            <div className="space-y-1.5">
-              <label htmlFor="category" className="block text-xs font-bold uppercase tracking-wider text-black">
-                Primary Category <span className="text-neutral-400">*</span>
-              </label>
-              <select
-                id="category"
-                value={formData.categoryId}
-                onChange={(e) => setFormData((prev) => ({ ...prev, categoryId: e.target.value }))}
-                className="w-full glass-input rounded-2xl px-4 py-3 text-xs font-medium focus:ring-1 focus:ring-black"
-                required
+              {/* Star Rating Bar */}
+              <div className="space-y-2">
+                <Label>
+                  Overall Experience <span className="text-neutral-400">*</span>
+                </Label>
+
+                <div className="glass-well p-3 rounded-2xl flex justify-between items-center px-4">
+                  {[1, 2, 3, 4, 5].map((star) => {
+                    const isSelected = formData.rating >= star;
+                    return (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setFormData((prev) => ({ ...prev, rating: star }))}
+                        className="group p-2 transition-all duration-150 transform hover:-translate-y-0.5 active:scale-95"
+                        aria-label={`${star} Stars`}
+                      >
+                        <Star
+                          className={`h-7 w-7 sm:h-8 sm:w-8 transition-all ${
+                            isSelected
+                              ? "fill-black text-black drop-shadow-[0_2px_8px_rgba(0,0,0,0.25)]"
+                              : "text-neutral-300 group-hover:text-neutral-500"
+                          }`}
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {formData.rating > 0 && (
+                  <div className="flex items-center justify-between px-1 text-xs">
+                    <span className="font-bold text-black">
+                      {RATING_DESCRIPTIONS[formData.rating].label}
+                    </span>
+                    <span className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">
+                      {RATING_DESCRIPTIONS[formData.rating].tag} ({formData.rating}/5)
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Category Select (shadcn Radix Select) */}
+              <div className="space-y-1.5">
+                <Label>
+                  Primary Category <span className="text-neutral-400">*</span>
+                </Label>
+                <Select
+                  value={formData.categoryId}
+                  onValueChange={(val) =>
+                    setFormData((prev) => ({ ...prev, categoryId: val }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select area of observation..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {metadata.categories.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Comments Area */}
+              <div className="space-y-1.5">
+                <Label htmlFor="message">Detailed Feedback</Label>
+                <Textarea
+                  id="message"
+                  rows={3}
+                  value={formData.message}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, message: e.target.value }))
+                  }
+                  placeholder="Share any highlights, product issues, or store observations..."
+                  maxLength={1000}
+                />
+                <div className="text-right text-[10px] text-neutral-400 font-mono">
+                  {formData.message.length} / 1000
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Optional Customer Contact Section */}
+              <div className="space-y-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
+                  Optional Follow-Up Details
+                </p>
+                <Input
+                  type="text"
+                  placeholder="Your Name (optional)"
+                  value={formData.customerName}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, customerName: e.target.value }))
+                  }
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Input
+                    type="email"
+                    placeholder="Email Address"
+                    value={formData.customerEmail}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, customerEmail: e.target.value }))
+                    }
+                  />
+                  <Input
+                    type="tel"
+                    placeholder="Phone Number"
+                    value={formData.customerPhone}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, customerPhone: e.target.value }))
+                    }
+                  />
+                </div>
+                <p className="flex items-center gap-1.5 text-[10px] text-neutral-500 font-medium">
+                  <Lock className="h-3 w-3 shrink-0" />
+                  <span>Privacy Guarantee: Under NDPR, contact info remains strictly confidential.</span>
+                </p>
+              </div>
+
+              <Button
+                type="submit"
+                disabled={isSubmitting || isRateLimited}
+                size="lg"
+                className="w-full"
               >
-                <option value="" disabled>Select area of observation...</option>
-                {metadata.categories.map((cat) => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Comments Area */}
-            <div className="space-y-1.5">
-              <label htmlFor="message" className="block text-xs font-bold uppercase tracking-wider text-black">
-                Detailed Feedback
-              </label>
-              <textarea
-                id="message"
-                rows={3}
-                value={formData.message}
-                onChange={(e) => setFormData((prev) => ({ ...prev, message: e.target.value }))}
-                placeholder="Share any highlights, product issues, or store observations..."
-                className="w-full glass-input rounded-2xl p-4 text-xs font-medium placeholder-neutral-400"
-                maxLength={1000}
-              />
-              <div className="text-right text-[10px] text-neutral-400 font-mono">
-                {formData.message.length} / 1000
-              </div>
-            </div>
-
-            {/* Optional Customer Contact Section */}
-            <div className="pt-4 border-t border-black/[0.08] space-y-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">
-                Optional Follow-Up Details
-              </p>
-              <input
-                type="text"
-                placeholder="Your Name (optional)"
-                value={formData.customerName}
-                onChange={(e) => setFormData((prev) => ({ ...prev, customerName: e.target.value }))}
-                className="w-full glass-input rounded-2xl px-4 py-2.5 text-xs placeholder-neutral-400"
-              />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <input
-                  type="email"
-                  placeholder="Email Address"
-                  value={formData.customerEmail}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, customerEmail: e.target.value }))}
-                  className="w-full glass-input rounded-2xl px-4 py-2.5 text-xs placeholder-neutral-400"
-                />
-                <input
-                  type="tel"
-                  placeholder="Phone Number"
-                  value={formData.customerPhone}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, customerPhone: e.target.value }))}
-                  className="w-full glass-input rounded-2xl px-4 py-2.5 text-xs placeholder-neutral-400"
-                />
-              </div>
-              <p className="text-[10px] text-neutral-500 font-medium">
-                🔒 Privacy Guarantee: Under NDPR regulations, contact info remains strictly confidential.
-              </p>
-            </div>
-
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={isSubmitting || isRateLimited}
-              className="w-full py-3.5 bg-black hover:bg-neutral-800 disabled:bg-neutral-300 text-white font-bold rounded-2xl text-xs transition duration-200 shadow-xl hover:-translate-y-0.5 active:scale-[0.99] flex items-center justify-center space-x-2"
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Recording Submission...</span>
-                </>
-              ) : (
-                <span>Submit Feedback</span>
-              )}
-            </button>
-          </form>
-        </div>
+                {isSubmitting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Recording Submission...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-3.5 w-3.5" />
+                    <span>Submit Feedback</span>
+                  </>
+                )}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       )}
     </main>
   );
