@@ -4,14 +4,14 @@ from django.db import models
 from core.managers import TenantManager
 from core.models import BaseModel
 from feedback.models import Feedback
-from organizations.models import Branch, Organization
+from organizations.models import Branch, Organization, Sector
 
 
 class Complaint(BaseModel):
     """
     The actionable escalation of a Feedback. Zero-or-one per feedback,
-    enforced by the OneToOne field below (Phase 2 §7-8). Created
-    manually by a Manager/Admin — never automatically (Phase 2 §8).
+    enforced by the OneToOne field below (Phase 2 §7-8). Can be auto-routed
+    on critical 1–2★ customer QR scans or escalated manually by staff.
 
     organization and branch are denormalized from feedback for direct
     tenant/branch filtering; both are protected by composite FKs added
@@ -30,6 +30,7 @@ class Complaint(BaseModel):
         LOW = "low", "Low"
         MEDIUM = "medium", "Medium"
         HIGH = "high", "High"
+        URGENT = "urgent", "Urgent"
 
     feedback = models.OneToOneField(
         Feedback, on_delete=models.PROTECT, related_name="complaint"
@@ -40,11 +41,20 @@ class Complaint(BaseModel):
     branch = models.ForeignKey(
         Branch, on_delete=models.PROTECT, related_name="complaints"
     )
+    sector = models.CharField(
+        max_length=40,
+        choices=Sector.choices,
+        default=Sector.GENERAL,
+        db_index=True,
+    )
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.NEW
     )
     priority = models.CharField(
-        max_length=20, choices=Priority.choices, default=Priority.MEDIUM
+        max_length=20,
+        choices=Priority.choices,
+        default=Priority.MEDIUM,
+        db_index=True,
     )
     assigned_to = models.ForeignKey(
         "accounts.User",
@@ -56,8 +66,19 @@ class Complaint(BaseModel):
     created_by = models.ForeignKey(
         "accounts.User",
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="created_complaints",
     )
+    delegated_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="delegated_complaints",
+    )
+    delegated_at = models.DateTimeField(null=True, blank=True)
+    due_at = models.DateTimeField(null=True, blank=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
     resolution_summary = models.TextField(blank=True, null=True)
 
@@ -68,6 +89,7 @@ class Complaint(BaseModel):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["organization", "status"]),
+            models.Index(fields=["organization", "sector", "status"]),
             models.Index(fields=["assigned_to"]),
             models.Index(fields=["branch"]),
         ]
@@ -119,6 +141,14 @@ class Complaint(BaseModel):
                 raise ValidationError(
                     "Assigned user must be linked to the complaint branch."
                 )
+        if (
+            self.delegated_by_id
+            and self.organization_id
+            and self.delegated_by.organization_id != self.organization_id
+        ):
+            raise ValidationError(
+                "Delegator must belong to the complaint organization."
+            )
 
     def save(self, *args, **kwargs):
         # Belt-and-braces app-layer consistency, mirroring Feedback.save()

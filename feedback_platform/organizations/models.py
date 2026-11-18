@@ -5,6 +5,18 @@ from core.managers import TenantManager
 from core.models import BaseModel
 
 
+class Sector(models.TextChoices):
+    """Standardized supermarket operational sectors / departments."""
+
+    GENERAL = "GENERAL", "General Store Operations"
+    POS_CASHIER = "POS_CASHIER", "Front-End POS & Cashiers"
+    BAKERY_PRODUCE = "BAKERY_PRODUCE", "Bakery & Fresh Produce"
+    COLD_CHAIN_MEAT = "COLD_CHAIN_MEAT", "Cold Chain, Dairy & Butchery"
+    GROCERY_STOCK = "GROCERY_STOCK", "Grocery, Aisles & Shelf Stocking"
+    CUSTOMER_SERVICE = "CUSTOMER_SERVICE", "Customer Service & Returns"
+    FACILITY_SECURITY = "FACILITY_SECURITY", "Facility, Hygiene & Security"
+
+
 class Organization(BaseModel):
     """
     A supermarket company using the platform. Root of tenancy — every
@@ -80,6 +92,13 @@ class UserBranch(BaseModel):
     organization = models.ForeignKey(
         Organization, on_delete=models.CASCADE, related_name="user_branch_links"
     )
+    sector = models.CharField(
+        max_length=40,
+        choices=Sector.choices,
+        default=Sector.GENERAL,
+        db_index=True,
+    )
+    is_sector_lead = models.BooleanField(default=False)
 
     class Meta:
         db_table = "user_branch"

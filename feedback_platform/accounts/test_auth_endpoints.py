@@ -179,10 +179,10 @@ class AuthEndpointsTests(TestCase):
 class DemoDataCommandTests(TestCase):
     def test_seed_demo_data_command_runs_cleanly(self):
         call_command("seed_demo_data")
-        # Verify freshmart organization exists
+        # Verify freshmart organization exists with branches, sector leads, feedback & complaints
         org = Organization.objects.filter(slug="freshmart").first()
         self.assertIsNotNone(org)
         self.assertEqual(org.branches.count(), 2)
-        self.assertEqual(org.users.count(), 3)
+        self.assertEqual(org.users.count(), 6)
         self.assertEqual(org.feedback_items.count(), 25)
         self.assertEqual(org.complaints.count(), 5)

@@ -166,6 +166,43 @@ class PublicFeedbackSubmitView(APIView):
                     organization=qr_obj.branch.organization,
                     source=Feedback.Source.QR,
                 )
+
+                routed_complaint = None
+                if feedback.rating <= 2:
+                    from complaints.models import Complaint
+                    from organizations.models import Sector
+
+                    target_sector = category.default_sector or Sector.GENERAL
+                    auto_priority = (
+                        Complaint.Priority.URGENT
+                        if feedback.rating == 1
+                        else Complaint.Priority.HIGH
+                    )
+                    sector_link = (
+                        UserBranch.objects.select_related("user")
+                        .filter(
+                            branch=qr_obj.branch,
+                            organization=qr_obj.branch.organization,
+                            sector=target_sector,
+                            user__is_active=True,
+                        )
+                        .order_by("-is_sector_lead", "created_at")
+                        .first()
+                    )
+                    assignee = sector_link.user if sector_link else None
+
+                    routed_complaint, _ = Complaint.objects.get_or_create(
+                        feedback=feedback,
+                        defaults={
+                            "organization": qr_obj.branch.organization,
+                            "branch": qr_obj.branch,
+                            "sector": target_sector,
+                            "priority": auto_priority,
+                            "status": Complaint.Status.NEW,
+                            "assigned_to": assignee,
+                            "created_by": None,
+                        },
+                    )
         except Exception:
             cache.delete(dedup_lock_key)
             raise
@@ -175,6 +212,15 @@ class PublicFeedbackSubmitView(APIView):
             "id": str(feedback.id),
             "sentiment": feedback.sentiment,
         }
+        if routed_complaint is not None:
+            response_payload["complaint_id"] = str(routed_complaint.id)
+            response_payload["routed_sector"] = routed_complaint.sector
+            response_payload["priority"] = routed_complaint.priority
+            response_payload["assigned_to_id"] = (
+                str(routed_complaint.assigned_to_id)
+                if routed_complaint.assigned_to_id
+                else None
+            )
         cache.set(dedup_resp_key, response_payload, timeout=FEEDBACK_DEDUP_TTL_SECONDS)
 
         return Response(response_payload, status=status.HTTP_201_CREATED)

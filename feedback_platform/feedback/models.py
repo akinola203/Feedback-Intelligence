@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from core.managers import TenantManager
 from core.models import BaseModel
-from organizations.models import Branch, Organization
+from organizations.models import Branch, Organization, Sector
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,11 @@ class Category(BaseModel):
         blank=True,
     )
     name = models.CharField(max_length=100)
+    default_sector = models.CharField(
+        max_length=40,
+        choices=Sector.choices,
+        default=Sector.GENERAL,
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:

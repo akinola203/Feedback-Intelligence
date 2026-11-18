@@ -190,3 +190,16 @@ class ManagerAlertConsumer(AsyncJsonWebsocketConsumer):
             await self._terminate_zombie_connection()
             return
         await self.send_json(payload)
+
+    async def send_task_delegated_alert(self, event):
+        """
+        Handler for type: 'send_task_delegated_alert'.
+        Re-verifies active session and branch authorization before notifying
+        connected sector managers and org admins of task delegation events.
+        """
+        payload = event.get("content", event)
+        branch_id = payload.get("branch_id") if isinstance(payload, dict) else None
+        if not await self._verify_active_session(branch_id=branch_id):
+            await self._terminate_zombie_connection()
+            return
+        await self.send_json(payload)

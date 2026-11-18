@@ -34,6 +34,18 @@ interface NegativeFeedbackAlert {
   created_at: string;
 }
 
+interface TaskDelegatedAlert {
+  id: string;
+  complaint_id: string;
+  branch_name: string;
+  sector_label: string;
+  priority: string;
+  assigned_to_name: string;
+  delegated_by_name: string;
+  note: string;
+  created_at: string;
+}
+
 export default function ManagerAnalyticsDashboard() {
   const [data, setData] = useState<AnalyticsPayload | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>("");
@@ -43,6 +55,7 @@ export default function ManagerAnalyticsDashboard() {
 
   // Real-time alert states
   const [liveAlerts, setLiveAlerts] = useState<NegativeFeedbackAlert[]>([]);
+  const [delegationAlerts, setDelegationAlerts] = useState<TaskDelegatedAlert[]>([]);
   const [isExportingPDF, setIsExportingPDF] = useState<boolean>(false);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -120,6 +133,23 @@ export default function ManagerAnalyticsDashboard() {
             if (payload.type === "pong") {
               return;
             }
+            if (payload.event_type === "TASK_DELEGATED") {
+              setDelegationAlerts((prev) => [
+                {
+                  id: `${payload.complaint_id}-${Date.now()}`,
+                  complaint_id: payload.complaint_id || "",
+                  branch_name: payload.branch_name || "Store Branch",
+                  sector_label: payload.sector_label || payload.sector || "Operations",
+                  priority: payload.priority || "high",
+                  assigned_to_name: payload.assigned_to_name || "Sector Manager",
+                  delegated_by_name: payload.delegated_by_name || "Supervisor",
+                  note: payload.note || "Please review and action this escalation.",
+                  created_at: payload.created_at || new Date().toISOString(),
+                },
+                ...prev.slice(0, 3),
+              ]);
+              return;
+            }
             if (payload.rating && payload.rating <= 2) {
               setLiveAlerts((prev) => [
                 {
@@ -170,6 +200,10 @@ export default function ManagerAnalyticsDashboard() {
 
   const dismissAlert = (id: string) => {
     setLiveAlerts((prev) => prev.filter((alert) => alert.id !== id));
+  };
+
+  const dismissDelegationAlert = (id: string) => {
+    setDelegationAlerts((prev) => prev.filter((alert) => alert.id !== id));
   };
 
   const handleExportPDF = async () => {
@@ -237,6 +271,56 @@ export default function ManagerAnalyticsDashboard() {
 
   return (
     <div className="space-y-8">
+      {/* Real-time WebSocket Task Delegation Alert (Smoked Black Glass) */}
+      {delegationAlerts.length > 0 && (
+        <div className="space-y-3">
+          {delegationAlerts.map((alert) => (
+            <div
+              key={alert.id}
+              className="glass-smoked p-5 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-white/20 text-white shadow-2xl transition-all"
+            >
+              <div className="flex items-start space-x-3.5">
+                <div className="relative mt-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-white block animate-ping absolute inset-0 opacity-75" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-white block relative" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="bg-white text-black font-extrabold text-[10px] uppercase tracking-wider px-2 py-0.5 rounded">
+                      Task Delegated • {alert.priority}
+                    </span>
+                    <span className="text-xs font-bold text-white">{alert.branch_name}</span>
+                    <span className="text-xs text-neutral-400">• {alert.sector_label}</span>
+                  </div>
+                  <p className="text-xs font-medium text-neutral-200">
+                    Assigned to <strong className="text-white">{alert.assigned_to_name}</strong> by{" "}
+                    {alert.delegated_by_name}
+                  </p>
+                  {alert.note && (
+                    <p className="text-[11px] text-neutral-300 italic">"{alert.note}"</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="self-end sm:self-center flex items-center space-x-2">
+                <a
+                  href="/dashboard/complaints"
+                  className="text-xs font-bold bg-white text-black px-3 py-1.5 rounded-xl hover:bg-neutral-200 transition"
+                >
+                  Open Queue
+                </a>
+                <button
+                  onClick={() => dismissDelegationAlert(alert.id)}
+                  className="text-xs font-semibold text-neutral-400 hover:text-white px-3 py-1.5 rounded-xl border border-white/10 hover:border-white/30 transition"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Real-time WebSocket Critical Review Alert (Smoked Black Glass) */}
       {liveAlerts.length > 0 && (
         <div className="space-y-3">
