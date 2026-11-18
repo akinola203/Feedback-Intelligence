@@ -22,7 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / ".env")
 
-IS_TESTING = "test" in sys.argv or any("pytest" in arg for arg in sys.argv)
+IS_TESTING = "pytest" in sys.modules or "test" in sys.argv or any("pytest" in arg for arg in sys.argv)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "True") == "True"
@@ -53,7 +53,7 @@ if not DEBUG and not IS_TESTING:
         raise ImproperlyConfigured(
             "DJANGO_ALLOWED_HOSTS must be explicitly locked down (no wildcard '*') in production."
         )
-if DEBUG and "testserver" not in ALLOWED_HOSTS:
+if (DEBUG or IS_TESTING) and "testserver" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("testserver")
 
 # Fast password hasher for test suite execution
@@ -163,11 +163,18 @@ X_FRAME_OPTIONS = 'DENY'
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
 
+SECURE_SSL_REDIRECT = (
+    os.environ.get(
+        "SECURE_SSL_REDIRECT",
+        os.environ.get("DJANGO_SECURE_SSL_REDIRECT", str(not DEBUG and not IS_TESTING)),
+    ).lower()
+    in ("true", "1", "yes")
+)
+
 if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    SECURE_SSL_REDIRECT = os.environ.get("DJANGO_SECURE_SSL_REDIRECT", "True") == "True"
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
@@ -200,7 +207,7 @@ ASGI_APPLICATION = 'config.asgi.application'
 REDIS_URL = os.environ.get("REDIS_URL")
 
 # Caches configuration (Redis in production, LocMemCache in dev/test)
-if "test" in sys.argv or any("pytest" in arg for arg in sys.argv) or not REDIS_URL:
+if IS_TESTING or not REDIS_URL:
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
@@ -222,7 +229,7 @@ CHANNEL_LAYER_BACKPRESSURE_CONFIG = {
     "group_expiry": 86400,  # Clean up stale manager group subscriptions (24 hours)
 }
 
-if "test" in sys.argv or any("pytest" in arg for arg in sys.argv):
+if IS_TESTING:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels.layers.InMemoryChannelLayer",

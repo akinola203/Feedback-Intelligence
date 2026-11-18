@@ -189,6 +189,8 @@ class AppSecAuditTests(TestCase):
 
     # Check #9 & #15: Security Headers, Cookie Hardening & Canonical UTC Settings
     def test_security_and_timezone_settings_enforced(self):
+        self.assertTrue(settings.IS_TESTING)
+        self.assertFalse(settings.SECURE_SSL_REDIRECT)
         self.assertTrue(settings.SESSION_COOKIE_HTTPONLY)
         self.assertEqual(settings.SESSION_COOKIE_SAMESITE, "Lax")
         self.assertEqual(settings.X_FRAME_OPTIONS, "DENY")
@@ -196,6 +198,10 @@ class AppSecAuditTests(TestCase):
         self.assertTrue(settings.USE_TZ)
         self.assertEqual(settings.TIME_ZONE, "UTC")
         self.assertEqual(settings.DISPLAY_TIME_ZONE, "Africa/Lagos")
+        if not settings.DEBUG:
+            self.assertTrue(settings.SESSION_COOKIE_SECURE)
+            self.assertTrue(settings.CSRF_COOKIE_SECURE)
+            self.assertEqual(settings.SECURE_HSTS_SECONDS, 31536000)
 
 
 class BranchScopedWebSocketAuthorizationTests(TransactionTestCase):
